@@ -1,0 +1,13 @@
+const fs = require('fs');
+const path = require('path');
+
+const parentFile = path.join(__dirname, '../extracted_installed_new/out/main/index.js');
+const content = fs.readFileSync(parentFile, 'utf8');
+
+let idx = 0;
+while ((idx = content.indexOf('ensureProject(', idx)) !== -1) {
+  console.log(`\n=== Found ensureProject( at ${idx} ===`);
+  console.log(content.slice(Math.max(0, idx - 50), Math.min(content.length, idx + 600)));
+  idx += 14;
+  if (idx > 1000000) break;
+}

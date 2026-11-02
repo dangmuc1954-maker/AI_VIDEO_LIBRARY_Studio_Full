@@ -1,11 +1,10 @@
 const fs = require('fs');
-const curMain = fs.readFileSync('app/out/main/index.js', 'utf8');
 
-let pos = 0;
-while (true) {
-  const idx = curMain.indexOf('submitVideo(', pos);
-  if (idx === -1) break;
-  console.log('submitVideo( at', idx);
-  console.log(curMain.slice(idx - 100, idx + 1000));
-  pos = idx + 1;
+const code = fs.readFileSync('temp_original_asar/out/main/index.js', 'utf8');
+
+let idx = 0;
+while ((idx = code.indexOf('.submitVideo(', idx)) !== -1) {
+  console.log('=== .submitVideo( at', idx, '===');
+  console.log(code.slice(Math.max(0, idx - 300), Math.min(code.length, idx + 800)));
+  idx += 13;
 }

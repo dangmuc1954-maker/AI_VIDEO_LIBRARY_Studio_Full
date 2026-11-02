@@ -1,6 +1,9 @@
 const fs = require('fs');
-const mainCode = fs.readFileSync('app/out/main/index.js', 'utf8');
+const c = fs.readFileSync('app/out/main/index.js', 'utf8');
 
-const wIdx = mainCode.indexOf('const a=await this.writeAsset(');
-console.log('--- cacheQueueAsset return (1500 chars) ---');
-console.log(mainCode.slice(wIdx, wIdx + 1500));
+const target = 'async writeAsset(';
+const idx = c.indexOf(target);
+console.log('writeAsset at', idx);
+if (idx !== -1) {
+  console.log(c.substring(idx, idx + 2500));
+}

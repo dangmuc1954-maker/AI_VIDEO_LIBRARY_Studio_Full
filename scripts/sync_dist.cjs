@@ -71,6 +71,14 @@ for (const target of targets) {
     console.log('  ✓ Đã đồng bộ thư mục modules/ (AI Upscaler & Watermark Cleaner)');
   }
 
+  // 3c. Copy extensions/ (AIForge Flow Bridge & Captcha Solver)
+  const extSrc = path.join(__dirname, '../app/extensions');
+  const extDest = path.join(target, 'extensions');
+  if (fs.existsSync(extSrc)) {
+    copyDir(extSrc, extDest);
+    console.log('  ✓ Đã đồng bộ thư mục extensions/ (AIForge Flow Bridge & Captcha Solver)');
+  }
+
   // 4. Update package.json
   const pkgPath = path.join(target, 'package.json');
   if (fs.existsSync(pkgPath)) {
@@ -94,6 +102,41 @@ for (const target of targets) {
       console.log('  ✓ Đã đính kèm công cụ mở khóa quyền ổ đĩa: Cap_Quyen_Ghi_O_Dia_D.bat');
     } catch (_) {}
   }
+
+  // 6. 🛡️ BẢO VỆ DỮ LIỆU RIÊNG TƯ & CÔ LẬP KHÁCH HÀNG (CUSTOMER PRIVACY GUARDRAIL)
+  // Quét và tiêu diệt triệt để mọi file dữ liệu nhạy cảm nếu vô tình bị sao chép vào target
+  const forbiddenPatterns = [
+    'browser-sessions',
+    'license-state',
+    'asset-state',
+    'queue-state',
+    'deleted-accounts',
+    'google-flow-runtime-state',
+    'gemini-api-key'
+  ];
+  function scanAndPurge(dir) {
+    if (!fs.existsSync(dir)) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === 'Partitions') {
+          console.warn('⚠️ Phát hiện thư mục Partitions trong dist - Đang tiêu hủy ngay để bảo vệ riêng tư...');
+          fs.rmSync(fullPath, { recursive: true, force: true });
+        } else {
+          scanAndPurge(fullPath);
+        }
+      } else {
+        const lowerName = entry.name.toLowerCase();
+        if (forbiddenPatterns.some(p => lowerName.includes(p)) && lowerName.endsWith('.json')) {
+          console.warn(`⚠️ Phát hiện file tài khoản/dữ liệu cá nhân: ${entry.name} trong dist - Đang tiêu hủy ngay!`);
+          fs.rmSync(fullPath, { force: true });
+        }
+      }
+    }
+  }
+  scanAndPurge(target);
+  console.log('  🛡️ Đã kiểm tra & đảm bảo 100% sạch bóng tài khoản/dữ liệu cá nhân');
 }
 
 console.log('🌟 ĐỒNG BỘ TOÀN BỘ CÁC BẢN EXE THÀNH CÔNG! 🌟');
+

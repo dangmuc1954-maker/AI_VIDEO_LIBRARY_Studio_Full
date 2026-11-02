@@ -1,9 +1,4 @@
-const https = require('https');
-
-https.get('https://labs.google/fx/api/auth/providers', res => {
-  let d = '';
-  res.on('data', c => d += c);
-  res.on('end', () => {
-    console.log('Providers:', d);
-  });
-});
+const fs = require('fs');
+const content = fs.readFileSync('app/out/main/index.js', 'utf8');
+const matches = content.match(/providerId\s*===?\s*["'][^"']+["']/g) || [];
+console.log(Array.from(new Set(matches)));

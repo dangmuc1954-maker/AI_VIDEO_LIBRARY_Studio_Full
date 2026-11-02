@@ -317,7 +317,7 @@ const Flow = {
       return { text };
     },
 
-    image: async ({ prompt, referenceImageMediaIds = [], aspectRatio = '9:16', modelDisplayName = '🍌 Nano Banana Pro', targetAccId, targetAccName, removeWatermark = true, imageResolution = '2k' }) => {
+    image: async ({ prompt, referenceImageMediaIds = [], aspectRatio = '9:16', modelDisplayName = '🍌 Nano Banana Pro', targetAccId, targetAccName, removeWatermark = true, imageResolution = '2k', imageEngine = (typeof localStorage !== 'undefined' ? localStorage.getItem("aiforge_fitting_image_engine") || "banana" : "banana") }) => {
       const qApi = window.aiforge?.queue || window.aivideo?.queue;
       const assetsApi = window.aiforge?.assets || window.aivideo?.assets;
       if (!qApi?.addJobs && !qApi?.addJob) throw new Error("Hệ thống Hàng đợi chưa sẵn sàng");
@@ -325,8 +325,8 @@ const Flow = {
       const jobInput = {
         title: `[Phòng Thay Đồ] Storyboard Slot Image`,
         type: "Image",
-        providerId: "banana",
-        provider: "Banana",
+        providerId: imageEngine === "muse" ? "muse" : "banana",
+        provider: imageEngine === "muse" ? "Muse AI" : "Banana",
         ...(targetAccId ? { accountId: targetAccId, account: targetAccName } : {}),
         payload: {
           title: `[Phòng Thay Đồ] Storyboard Slot Image`,
@@ -334,7 +334,7 @@ const Flow = {
           ratio: aspectRatio || "9:16",
           aspectRatio: aspectRatio || "9:16",
           referenceAssetIds: referenceImageMediaIds,
-          model: "banana",
+          model: imageEngine === "muse" ? "muse-image" : "banana",
           modelDisplayName: modelDisplayName || "🍌 Nano Banana Pro",
           studioSource: "fitting-room",
           autoRemoveWatermark: removeWatermark,
@@ -1313,6 +1313,9 @@ export default function FittingRoomKocStudio({
   setRemoveWatermark: propSetRemoveWatermark
 }) {
   const persist = (typeof window !== "undefined" && window.__AIFORGE_FITTING_ROOM_PERSISTENCE__) || {};
+  const [imageEngine, setImageEngine] = React.useState(() => {
+    try { return localStorage.getItem("aiforge_fitting_image_engine") || "banana"; } catch(e) { return "banana"; }
+  });
 
   // Tham chiếu cố định
   const [kocImage, setKocImage] = React.useState(persist.kocImage || null);
@@ -1782,8 +1785,8 @@ export default function FittingRoomKocStudio({
         jobs.push({
           title: `[Phòng Thay Đồ] Storyboard Slot #${slot.index + 1}`,
           type: "Image",
-          providerId: "banana",
-          provider: "Banana",
+          providerId: imageEngine === "muse" ? "muse" : "banana",
+          provider: imageEngine === "muse" ? "Muse AI" : "Banana",
           ...(targetBananaAccId ? { accountId: targetBananaAccId, account: targetBananaAccName } : {}),
           payload: {
             title: `[Phòng Thay Đồ] Storyboard Slot #${slot.index + 1}`,
@@ -1791,7 +1794,7 @@ export default function FittingRoomKocStudio({
             ratio: "9:16",
             aspectRatio: "9:16",
             referenceAssetIds: referenceIds.filter(Boolean),
-            model: "banana",
+            model: imageEngine === "muse" ? "muse-image" : "banana",
             modelDisplayName: "🍌 Nano Banana Pro",
             studioSource: "fitting-room",
             autoRemoveWatermark: removeWatermark,
@@ -1890,8 +1893,8 @@ export default function FittingRoomKocStudio({
       const jobInput = {
         title: `[Phòng Thay Đồ] Retry Slot #${targetTask.index + 1}`,
         type: "Image",
-        providerId: "banana",
-        provider: "Banana",
+        providerId: imageEngine === "muse" ? "muse" : "banana",
+        provider: imageEngine === "muse" ? "Muse AI" : "Banana",
         ...(curAcc?.accountId ? { accountId: curAcc.accountId, account: curAcc.accountDisplayName || curAcc.accountEmail } : {}),
         payload: {
           title: `[Phòng Thay Đồ] Retry Slot #${targetTask.index + 1}`,
@@ -1899,7 +1902,7 @@ export default function FittingRoomKocStudio({
           ratio: "9:16",
           aspectRatio: "9:16",
           referenceAssetIds: referenceIds.filter(Boolean),
-          model: "banana",
+          model: imageEngine === "muse" ? "muse-image" : "banana",
           modelDisplayName: "🍌 Nano Banana Pro",
           studioSource: "fitting-room",
           autoRemoveWatermark: removeWatermark,
@@ -2220,48 +2223,86 @@ export default function FittingRoomKocStudio({
             )
           ),
 
-          // Banana Account Selector
+          // Image Engine & Account Selector (Banana Pro vs Muse AI)
           (() => {
-            const bananaAccounts = effectiveAccounts.filter(a => a.providerId === 'banana');
             return handleSelectBananaAccount && el("div", {
-              title: "Tài khoản tạo Ảnh Storyboard (Banana Pro / Google Flow)",
-              style: {
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                padding: '3px 8px',
-                borderRadius: '10px',
-                border: '1px solid rgba(245, 158, 11, 0.3)',
-                fontSize: '10px',
-                fontWeight: 'bold',
-                color: '#fcd34d'
-              }
+              style: { display: 'flex', alignItems: 'center', gap: '6px' }
             },
-              el("span", { style: { fontSize: '12px' } }, "🍌"),
-              bananaAccounts.length > 0 ? el("select", {
-                value: selectedBananaAccountId,
-                onChange: (e) => handleSelectBananaAccount(e.target.value),
+              el("div", {
+                style: { display: 'flex', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: '10px', border: '1px solid rgba(255,255,255,0.1)', padding: '2px' }
+              },
+                el("button", {
+                  type: "button",
+                  onClick: () => { setImageEngine("banana"); try { localStorage.setItem("aiforge_fitting_image_engine", "banana"); } catch(e){} },
+                  style: {
+                    padding: '2px 8px',
+                    borderRadius: '8px',
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    backgroundColor: imageEngine === "banana" ? '#f59e0b' : 'transparent',
+                    color: imageEngine === "banana" ? '#000' : '#9ca3af',
+                    border: 'none'
+                  }
+                }, "🍌 Banana"),
+                el("button", {
+                  type: "button",
+                  onClick: () => { setImageEngine("muse"); try { localStorage.setItem("aiforge_fitting_image_engine", "muse"); } catch(e){} },
+                  style: {
+                    padding: '2px 8px',
+                    borderRadius: '8px',
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    background: imageEngine === "muse" ? 'linear-gradient(to right, #9333ea, #db2777)' : 'transparent',
+                    color: imageEngine === "muse" ? '#fff' : '#9ca3af',
+                    border: 'none'
+                  }
+                }, "⚡ Muse AI")
+              ),
+              el("div", {
+                title: imageEngine === "muse" ? "Tài khoản tạo Ảnh Storyboard (Muse AI)" : "Tài khoản tạo Ảnh Storyboard (Banana Pro / Google Flow)",
                 style: {
-                  backgroundColor: 'transparent',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  backgroundColor: imageEngine === "muse" ? 'rgba(168, 85, 247, 0.1)' : 'rgba(245, 158, 11, 0.1)',
+                  padding: '3px 8px',
+                  borderRadius: '10px',
+                  border: imageEngine === "muse" ? '1px solid rgba(168, 85, 247, 0.3)' : '1px solid rgba(245, 158, 11, 0.3)',
                   fontSize: '10px',
                   fontWeight: 'bold',
-                  color: '#fcd34d',
-                  outline: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  maxWidth: '140px'
+                  color: imageEngine === "muse" ? '#e9d5ff' : '#fcd34d'
                 }
               },
-                el("option", { key: "auto", value: "auto", style: { backgroundColor: '#0b101f', color: '#fcd34d' } }, 
-                  bananaAccounts.length > 1 ? `🔄 Chia đều (${bananaAccounts.length} acc)` : "🔄 Tự chia đều"
-                ),
-                bananaAccounts.map(a => 
-                  el("option", { key: a.accountId, value: a.accountId, style: { backgroundColor: '#0b101f', color: '#ffffff' } },
-                    a.accountDisplayName || a.accountEmail || a.accountName
-                  )
-                )
-              ) : el("span", { style: { fontSize: '9.5px', color: '#94a3b8' } }, "Chưa có Acc")
+                el("span", { style: { fontSize: '12px' } }, imageEngine === "muse" ? "⚡" : "🍌"),
+                (() => {
+                  const avail = effectiveAccounts.filter(a => imageEngine === "muse" ? (a.providerId === "muse" || (a.provider && a.provider.toLowerCase().includes("muse"))) : (a.providerId === "banana"));
+                  return avail.length > 0 ? el("select", {
+                    value: selectedBananaAccountId,
+                    onChange: (e) => handleSelectBananaAccount(e.target.value),
+                    style: {
+                      backgroundColor: 'transparent',
+                      fontSize: '10px',
+                      fontWeight: 'bold',
+                      color: imageEngine === "muse" ? '#e9d5ff' : '#fcd34d',
+                      outline: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      maxWidth: '140px'
+                    }
+                  },
+                    el("option", { key: "auto", value: "auto", style: { backgroundColor: '#0b101f', color: '#fcd34d' } },
+                      avail.length > 1 ? (imageEngine === "muse" ? `🔄 Chia đều (${avail.length} acc)` : `🔄 Chia đều (${avail.length} acc)`) : "🔄 Tự chia đều"
+                    ),
+                    avail.map(a => 
+                      el("option", { key: a.accountId, value: a.accountId, style: { backgroundColor: '#0b101f', color: '#ffffff' } },
+                        (imageEngine === "muse" ? "⚡ " : "🍌 ") + (a.accountDisplayName || a.accountEmail || a.accountId)
+                      )
+                    )
+                  ) : el("span", { style: { fontSize: '10px', color: imageEngine === "muse" ? '#d8b4fe' : '#fbbf24', fontWeight: 600 } }, imageEngine === "muse" ? "Chưa có Muse AI" : "Chưa có Banana");
+                })()
+              )
             );
           })(),
 

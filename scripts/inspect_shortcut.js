@@ -1,22 +1,18 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 
-const psScript = `
-$wsh = New-Object -ComObject WScript.Shell
-$sc = $wsh.CreateShortcut('C:\\Users\\admin\\Desktop\\AIForge Studio.lnk')
-[PSCustomObject]@{
-    TargetPath = $sc.TargetPath
-    Arguments = $sc.Arguments
-    WorkingDirectory = $sc.WorkingDirectory
-} | ConvertTo-Json
-`;
-
-fs.writeFileSync('temp_sc.ps1', psScript);
 try {
-    const out = execSync('powershell -ExecutionPolicy Bypass -File temp_sc.ps1').toString();
-    console.log('Shortcut info:', out);
+  const psScript = `
+$w = New-Object -ComObject WScript.Shell
+$sc = $w.CreateShortcut('C:\\Users\\admin\\Desktop\\AIForge Studio (Unlocked).lnk')
+Write-Output "TARGET: $($sc.TargetPath)"
+Write-Output "WORKING_DIR: $($sc.WorkingDirectory)"
+Write-Output "ARGUMENTS: $($sc.Arguments)"
+`;
+  fs.writeFileSync('temp_resolve_lnk.ps1', psScript);
+  const out = execSync('powershell -NoProfile -ExecutionPolicy Bypass -File temp_resolve_lnk.ps1').toString();
+  console.log(out);
+  fs.unlinkSync('temp_resolve_lnk.ps1');
 } catch (e) {
-    console.error(e);
-} finally {
-    if (fs.existsSync('temp_sc.ps1')) fs.unlinkSync('temp_sc.ps1');
+  console.error('Error:', e);
 }

@@ -1,6 +1,80 @@
 import { bn as React, bf as toast } from "./index-BS7vgKVV.js";
 import FittingRoomKocStudio from "./FittingRoomKocStudio.js";
 
+// HELPER ĐĂNG KÝ ASSET ĐẢM BẢO ASSET ID HỢP LỆ TRONG HÀNG ĐỢI
+async function ensureRegisteredAsset(item, defaultName) {
+  if (!item) return null;
+  const isSynthetic = (id) => !id || typeof id !== 'string' || id.startsWith('ref-') || id.startsWith('asset-img-') || id.startsWith('asset-vid-');
+  if (item.assetId && !isSynthetic(item.assetId)) {
+    return item.assetId;
+  }
+  if (item.mediaId && !isSynthetic(item.mediaId)) {
+    return item.mediaId;
+  }
+  if (item.id && !isSynthetic(item.id)) {
+    return item.id;
+  }
+
+  const api = window.aiforge?.assets || window.aivideo?.assets;
+  if (api?.list) {
+    try {
+      const res = await api.list();
+      const assetsList = Array.isArray(res) ? res : (res?.assets || []);
+      const matched = assetsList.find(a => 
+        (item.localPath && a.localPath === item.localPath) ||
+        (item.url && (a.url === item.url || a.thumbnailUrl === item.url))
+      );
+      if (matched?.id && !isSynthetic(matched.id)) {
+        item.assetId = matched.id;
+        item.id = matched.id;
+        return matched.id;
+      }
+    } catch (_) {}
+  }
+
+  let dataUrl = item.base64 || item.dataUrl;
+  if (!dataUrl && typeof item.url === 'string' && item.url.startsWith('data:')) {
+    dataUrl = item.url;
+  }
+
+  if (!dataUrl && item.url && typeof window !== 'undefined') {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
+      const resp = await fetch(item.url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (resp.ok) {
+        const blob = await resp.blob();
+        dataUrl = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => resolve(null);
+          reader.readAsDataURL(blob);
+        });
+      }
+    } catch (_) {}
+  }
+
+  if (dataUrl && api?.importReference) {
+    try {
+      const imported = await api.importReference({
+        name: item.name || defaultName || 'aiforge_registered_asset.jpg',
+        mimeType: item.mimeType || 'image/jpeg',
+        dataUrl: dataUrl
+      });
+      if (imported?.id) {
+        item.assetId = imported.id;
+        item.mediaId = imported.id;
+        return imported.id;
+      }
+    } catch (_) {}
+  }
+  return (!isSynthetic(item.assetId) ? item.assetId : null) || 
+         (!isSynthetic(item.mediaId) ? item.mediaId : null) || 
+         (!isSynthetic(item.id) ? item.id : null);
+}
+
+
 // ==========================================
 // MASTER PROMPT TEMPLATES THEO TỪNG NGÀNH HÀNG
 // ==========================================
@@ -626,6 +700,92 @@ function getSmartMotionPrompt(sceneId, creativeDirection = '', outfitName = '') 
   }
 }
 
+// HELPER TRÍCH XUẤT ẢNH BASE64 AN TOÀN TUYỆT ĐỐI CHO GEMINI VISION & BROWSER DIRECTOR
+async function ensureAssetBase64(asset) {
+  if (!asset) return null;
+  try {
+    let raw = asset.base64 || asset.dataUrl;
+    if (!raw && typeof asset.url === 'string' && asset.url.startsWith('data:')) {
+      raw = asset.url;
+    }
+    if (typeof raw === 'string') {
+      if (raw.includes(';base64,')) {
+        const parts = raw.split(';base64,');
+        if (parts[1] && parts[1].length > 50) return parts[1].trim();
+      } else if (raw.includes(',')) {
+        const parts = raw.split(',');
+        if (parts[1] && parts[1].length > 50) return parts[1].trim();
+      } else if (raw.length > 50 && !raw.startsWith('http') && !raw.startsWith('file:')) {
+        return raw.trim();
+      }
+    }
+
+    const urlToFetch = asset.localPath 
+      ? ('file:///' + asset.localPath.replace(/\\/g, '/')) 
+      : (asset.url || asset.thumbnailUrl || null);
+
+    if (urlToFetch) {
+      try {
+        const resp = await fetch(urlToFetch);
+        if (resp.ok) {
+          const blob = await resp.blob();
+          const b64 = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              const res = reader.result;
+              if (typeof res === 'string' && res.includes(',')) {
+                resolve(res.split(',')[1]);
+              } else {
+                resolve(null);
+              }
+            };
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(blob);
+          });
+          if (b64) return b64;
+        }
+      } catch (_) {}
+
+      if (typeof document !== 'undefined') {
+        try {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.src = urlToFetch;
+          await new Promise((resolve, reject) => {
+            img.onload = () => resolve();
+            img.onerror = (e) => reject(e);
+            setTimeout(() => reject(new Error('Image timeout')), 3500);
+          });
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth || img.width || 512;
+          canvas.height = img.naturalHeight || img.height || 512;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+            if (dataUrl && dataUrl.includes(',')) {
+              return dataUrl.split(',')[1];
+            }
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (err) {
+    console.warn('[ensureAssetBase64] Error extracting base64:', err);
+  }
+  return null;
+}
+
+function isValidMotionPrompt(text) {
+  if (!text || typeof text !== 'string') return false;
+  const t = text.trim();
+  if (t.length < 25) return false;
+  if (t.includes('googleapis.com') || t.includes('google.rpc') || t.includes('ErrorInfo')) return false;
+  if (t.includes('RESOURCE_EXHAUSTED') || t.includes('RATE_LIMIT') || t.includes('PERMISSION_DENIED')) return false;
+  if (t.startsWith('{') && t.endsWith('}')) return false;
+  return true;
+}
+
 async function callGeminiVisionDirector(frame, action, apiKey, outfitAsset = null) {
   if (!frame?.imageAsset) {
     return { ok: false, error: "Cảnh này chưa có hình ảnh để phân tích" };
@@ -722,21 +882,22 @@ Return ONLY the raw English prompt text ready for Veo 3. Do NOT include markdown
   parts.push({ text: promptText });
 
   const modelsToTry = [
-    'gemini-flash-latest',
-    'gemini-flash-lite-latest',
-    'gemini-3.1-flash-lite',
-    'gemini-2.5-flash-lite',
-    'gemini-3.5-flash-lite',
-    'gemini-3.8-flash',
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
     'gemini-1.5-flash',
-    'gemini-2.0-flash'
+    'gemini-2.5-flash-lite',
+    'gemini-flash-latest',
+    'gemini-1.5-pro'
   ];
 
   let lastErr = '';
   for (const model of modelsToTry) {
     try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6500);
       const resp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
         method: 'POST',
+        signal: controller.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{
@@ -748,6 +909,7 @@ Return ONLY the raw English prompt text ready for Veo 3. Do NOT include markdown
           }
         })
       });
+      clearTimeout(timer);
 
       if (!resp.ok) {
         const errJson = await resp.json().catch(() => ({}));
@@ -757,7 +919,7 @@ Return ONLY the raw English prompt text ready for Veo 3. Do NOT include markdown
 
       const data = await resp.json();
       const prompt = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-      if (prompt && prompt.length > 20) {
+      if (prompt && isValidMotionPrompt(prompt)) {
         return { ok: true, prompt };
       }
     } catch (e) {
@@ -784,12 +946,18 @@ async function callGoogleFlowDirector(frame, action, flowAccounts) {
   }
 
   try {
-    const res = await bApi.analyzeMotion({
-      frameId: frame.id,
-      action: action,
-      imageBase64: cleanB64
-    });
-    return res;
+    const res = await Promise.race([
+      bApi.analyzeMotion({
+        frameId: frame.id,
+        action: action,
+        imageBase64: cleanB64
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Flow motion timeout")), 5000))
+    ]);
+    if (res && res.ok && isValidMotionPrompt(res.prompt)) {
+      return res;
+    }
+    return { ok: false, error: res?.error || "Kịch bản Google Flow không hợp lệ" };
   } catch (err) {
     return { ok: false, error: err?.message || String(err) };
   }
@@ -822,6 +990,12 @@ if (typeof window !== "undefined") {
       if (wm !== null) savedWatermark = wm === 'true';
     } catch (_) {}
 
+    let savedImgEngine = "muse";
+    try {
+      const ie = localStorage.getItem("aiforge_koc_image_engine") || localStorage.getItem("aivideo_factory_image_engine");
+      if (ie === "muse" || ie === "banana") savedImgEngine = ie;
+    } catch (_) {}
+
     window.__AIFORGE_FASHION_PERSISTENCE__ = {
       koc: savedKoc,
       outfit: savedOutfit,
@@ -830,6 +1004,7 @@ if (typeof window !== "undefined") {
       globalVideoModel: savedModel || "Veo 3.1 - Lite",
       technicalStyle: savedTech || "Shot on iPhone 15 Pro, authentic UGC lifestyle, luxury studio lighting, crisp 4k texture",
       videoEngine: savedEngine || "veo3",
+      imageEngine: savedImgEngine || "muse",
       imageResolution: savedImgRes || "standard",
       videoResolution: savedVidRes || "720p",
       removeWatermark: savedWatermark
@@ -862,6 +1037,34 @@ function buildSceneImagePrompt(templatePrompt, envStyle, techStyle) {
   return p;
 }
 
+// 🎯 QUY TẮC NẠP ẢNH THAM CHIẾU XƯỞNG THỜI TRANG (CHUẨN 100% YÊU CẦU NGƯỜI DÙNG):
+// Ảnh cảnh 1: 1 KOC gốc + 1 Outfit gốc -> [KOC, Outfit]
+// Ảnh cảnh 2: 1 KOC gốc + 1 Outfit gốc + 1 Cảnh 1 -> [KOC, Outfit, Cảnh 1]
+// Ảnh cảnh 3: 1 KOC gốc + 1 Outfit gốc + 1 Cảnh 2 -> [KOC, Outfit, Cảnh 2]
+// Ảnh cảnh 4..7: 1 KOC gốc + 1 Outfit gốc + 1 Cảnh 3 + 1 Cảnh 1 -> [KOC, Outfit, Cảnh 3, Cảnh 1]
+function getFashionSceneReferenceIds(frameId, validKocId, validOutfitId, validFrame1Id, validFrame2Id, validFrame3Id) {
+  const refs = [];
+  if (frameId === 1) {
+    if (validKocId) refs.push(validKocId);
+    if (validOutfitId) refs.push(validOutfitId);
+  } else if (frameId === 2) {
+    if (validKocId) refs.push(validKocId);
+    if (validOutfitId) refs.push(validOutfitId);
+    if (validFrame1Id) refs.push(validFrame1Id);
+  } else if (frameId === 3) {
+    if (validKocId) refs.push(validKocId);
+    if (validOutfitId) refs.push(validOutfitId);
+    if (validFrame2Id) refs.push(validFrame2Id);
+  } else if (frameId >= 4) {
+    if (validKocId) refs.push(validKocId);
+    if (validOutfitId) refs.push(validOutfitId);
+    if (validFrame3Id) refs.push(validFrame3Id);
+    if (validFrame1Id) refs.push(validFrame1Id);
+  }
+  return refs.filter((id, idx, arr) => id && arr.indexOf(id) === idx);
+}
+
+
 function FashionKocProStudio({
   currentNiche,
   handleSelectNiche,
@@ -890,6 +1093,13 @@ function FashionKocProStudio({
 
   // ⚡ TÍCH HỢP MODEL MUSE AI & CHẤT LƯỢNG / WATERMARK NHƯ XƯỞNG GIA DỤNG
   const [videoEngine, setVideoEngine] = React.useState(persist.videoEngine || 'veo3'); // 'veo3' | 'muse'
+  const [imageEngine, setImageEngine] = React.useState(() => {
+    try {
+      const ie = localStorage.getItem("aiforge_koc_image_engine");
+      if (ie === "muse" || ie === "banana") return ie;
+    } catch(_) {}
+    return persist.imageEngine || "muse";
+  }); // 'banana' | 'muse'
   const [imageResolution, setImageResolution] = React.useState(persist.imageResolution || 'standard'); // 'standard' | '2k'
   const [videoResolution, setVideoResolution] = React.useState(persist.videoResolution || '720p'); // '720p' | '1080p'
   const [removeWatermark, setRemoveWatermark] = React.useState(
@@ -905,15 +1115,32 @@ function FashionKocProStudio({
   });
   const [tempApiKeyInput, setTempApiKeyInput] = React.useState('');
 
+  const dispatchLocksRef = React.useRef({ anchor1: false, anchor2: false, anchor3: false });
+  const dispatchRef = React.useRef({});
+
   const stateRef = React.useRef({
     koc, outfit, creativeDirection, storyboard, globalVideoModel,
     videoEngine, imageResolution, videoResolution, removeWatermark
   });
 
   React.useEffect(() => {
+    if (!localApiKey) {
+      try {
+        const sApi = window.aiforge?.settings || window.aivideo?.settings;
+        sApi?.getGeminiApiKey?.().then(k => {
+          if (k && typeof k === 'string' && (k.startsWith('AIzaSy') || k.startsWith('AQ.'))) {
+            setLocalApiKey(k.trim());
+            try { localStorage.setItem('aivideo_gemini_api_key', k.trim()); } catch (_) {}
+          }
+        }).catch(() => {});
+      } catch (_) {}
+    }
+  }, [localApiKey]);
+
+  React.useEffect(() => {
     stateRef.current = {
       koc, outfit, creativeDirection, technicalStyle, storyboard, globalVideoModel,
-      videoEngine, imageResolution, videoResolution, removeWatermark
+      videoEngine, imageEngine, imageResolution, videoResolution, removeWatermark
     };
     if (typeof window !== "undefined" && window.__AIFORGE_FASHION_PERSISTENCE__) {
       window.__AIFORGE_FASHION_PERSISTENCE__.koc = koc;
@@ -923,6 +1150,7 @@ function FashionKocProStudio({
       window.__AIFORGE_FASHION_PERSISTENCE__.storyboard = storyboard;
       window.__AIFORGE_FASHION_PERSISTENCE__.globalVideoModel = globalVideoModel;
       window.__AIFORGE_FASHION_PERSISTENCE__.videoEngine = videoEngine;
+      window.__AIFORGE_FASHION_PERSISTENCE__.imageEngine = imageEngine;
       window.__AIFORGE_FASHION_PERSISTENCE__.imageResolution = imageResolution;
       window.__AIFORGE_FASHION_PERSISTENCE__.videoResolution = videoResolution;
       window.__AIFORGE_FASHION_PERSISTENCE__.removeWatermark = removeWatermark;
@@ -932,6 +1160,7 @@ function FashionKocProStudio({
       localStorage.setItem("aiforge_koc_technical_style", technicalStyle);
       localStorage.setItem("aiforge_koc_video_model", globalVideoModel);
       localStorage.setItem("aiforge_koc_video_engine", videoEngine);
+      localStorage.setItem("aiforge_koc_image_engine", imageEngine);
       localStorage.setItem("aiforge_koc_img_res", imageResolution);
       localStorage.setItem("aiforge_koc_vid_res", videoResolution);
       localStorage.setItem("aiforge_koc_watermark", String(removeWatermark));
@@ -939,7 +1168,7 @@ function FashionKocProStudio({
       if (koc) localStorage.setItem("aiforge_koc_face", JSON.stringify(koc));
       if (outfit) localStorage.setItem("aiforge_koc_outfit", JSON.stringify(outfit));
     } catch (_) {}
-  }, [koc, outfit, creativeDirection, technicalStyle, storyboard, globalVideoModel, videoEngine, imageResolution, videoResolution, removeWatermark]);
+  }, [koc, outfit, creativeDirection, technicalStyle, storyboard, globalVideoModel, videoEngine, imageEngine, imageResolution, videoResolution, removeWatermark]);
 
   // ⚡ Tự động đồng bộ tài khoản video khi chuyển đổi Engine giữa Muse AI và Veo 3
   React.useEffect(() => {
@@ -1080,9 +1309,11 @@ function FashionKocProStudio({
                   nextFrame.imageProgress = 100;
                   hasChanges = true;
 
-                  // 🎯 NỐI CHUỖI TỰ ĐỘNG: CẢNH 1 XONG -> NẠP CẢNH 2, 3; CẢNH 3 XONG -> NẠP CẢNH 4-7
+                  // 🎯 NỐI CHUỖI TỰ ĐỘNG: C1 XONG -> C2; C2 XONG -> C3; C3 XONG -> C4-7
                   if (f.id === 1) {
                     setTimeout(() => dispatchScenesWaitingAnchor1(nextFrame.imageAsset), 500);
+                  } else if (f.id === 2) {
+                    setTimeout(() => dispatchScenesWaitingAnchor2(nextFrame.imageAsset), 500);
                   } else if (f.id === 3) {
                     setTimeout(() => dispatchScenesWaitingAnchor3(nextFrame.imageAsset), 500);
                   }
@@ -1212,6 +1443,59 @@ function FashionKocProStudio({
           }
           try { localStorage.setItem("aiforge_koc_storyboard", JSON.stringify(updated)); } catch (_) {}
         }
+
+        // 🎯 TỰ ĐỘNG ĐIỀU PHỐI CHUỖI MỎ NEO TỰ ĐỘNG 7 CẢNH (ANCHOR AUTOPILOT)
+        const curFrames = updated;
+        const f1 = curFrames.find(f => f.id === 1);
+        const f2 = curFrames.find(f => f.id === 2);
+        const f3 = curFrames.find(f => f.id === 3);
+
+        const f1Asset = f1?.imageAsset;
+        const f2Asset = f2?.imageAsset;
+        const f3Asset = f3?.imageAsset;
+
+        const isF1Done = f1?.imageStatus === "done" && Boolean(getKocMediaUrl(f1Asset));
+        const isF2Done = f2?.imageStatus === "done" && Boolean(getKocMediaUrl(f2Asset));
+        const isF3Done = f3?.imageStatus === "done" && Boolean(getKocMediaUrl(f3Asset));
+
+        // 1. CẢNH 1 XONG -> TỰ ĐỘNG NỐI CHUỖI CẢNH 2
+        if (isF1Done && f2 && (f2.imageStatus === "waiting_anchor_1" || f2.imageStatus === "waiting_anchor") && !dispatchLocksRef.current.anchor1) {
+          dispatchLocksRef.current.anchor1 = true;
+          const handler = dispatchRef.current.dispatchScenesWaitingAnchor1 || dispatchScenesWaitingAnchor1;
+          handler(f1Asset).finally(() => {
+            dispatchLocksRef.current.anchor1 = false;
+          });
+        }
+
+        // 2. CẢNH 2 XONG -> TỰ ĐỘNG NỐI CHUỖI CẢNH 3
+        if (isF2Done && f3 && (f3.imageStatus === "waiting_anchor_2" || f3.imageStatus === "waiting_anchor") && !dispatchLocksRef.current.anchor2) {
+          dispatchLocksRef.current.anchor2 = true;
+          const handler = dispatchRef.current.dispatchScenesWaitingAnchor2 || dispatchScenesWaitingAnchor2;
+          handler(f2Asset).finally(() => {
+            dispatchLocksRef.current.anchor2 = false;
+          });
+        }
+
+        // 3. CẢNH 3 XONG -> TỰ ĐỘNG NỐI CHUỖI CẢNH 4, 5, 6, 7
+        const hasWaiting4to7 = curFrames.some(f => f.id >= 4 && (f.imageStatus === "waiting_anchor_3" || f.imageStatus === "waiting_anchor"));
+        if (isF3Done && hasWaiting4to7 && !dispatchLocksRef.current.anchor3) {
+          dispatchLocksRef.current.anchor3 = true;
+          const handler = dispatchRef.current.dispatchScenesWaitingAnchor3 || dispatchScenesWaitingAnchor3;
+          handler(f3Asset).finally(() => {
+            dispatchLocksRef.current.anchor3 = false;
+          });
+        }
+
+        // 4. KIỂM TRA HOÀN TẤT TOÀN BỘ 7 CẢNH
+        const allImagesDone = curFrames.length === 7 && curFrames.every(f => f.imageStatus === "done");
+        const nonePendingOrGenerating = !curFrames.some(f => f.imageStatus === "generating" || (typeof f.imageStatus === 'string' && f.imageStatus.startsWith("waiting_anchor")));
+        if (nonePendingOrGenerating && isMounted) {
+          setIsGeneratingImages(false);
+          if (allImagesDone && window.__AIFORGE_FASHION_BATCH_ACTIVE__) {
+            window.__AIFORGE_FASHION_BATCH_ACTIVE__ = false;
+            toast?.success?.("🎉 Tuyệt vời! Đã sản xuất tự động toàn bộ 7 cảnh ảnh thành công!");
+          }
+        }
       } catch (e) {
         console.warn("[KOC Studio Sync Error]:", e);
       }
@@ -1264,69 +1548,66 @@ function FashionKocProStudio({
         setOutfit(prev => prev ? { ...prev, assetId: validOutfitId, mediaId: validOutfitId } : prev);
       }
 
-      // 🎯 CHUỖI THAM CHIẾU GOOGLE FLOW:
-      // Cảnh 1: [Mặt KOC, Outfit]
-      // Cảnh 2 & 3: [Mặt KOC, Outfit, Cảnh 1]
-      // Cảnh 4-7: [Mặt KOC, Outfit, Cảnh 1, Cảnh 3]
-      const refs = [validKocId, validOutfitId].filter(Boolean);
-      if (frameId > 1) {
+      // 🎯 QUY TẮC NẠP ẢNH THAM CHIẾU XƯỞNG THỜI TRANG (CHUẨN 100% YÊU CẦU NGƯỜI DÙNG):
+      // Cảnh 1: [KOC gốc, Outfit gốc]
+      // Cảnh 2: [KOC gốc, Outfit gốc, Cảnh 1]
+      // Cảnh 3: [KOC gốc, Outfit gốc, Cảnh 2]
+      // Cảnh 4..7: [KOC gốc, Outfit gốc, Cảnh 3, Cảnh 1]
+      let validFrame1Id = null;
+      let validFrame2Id = null;
+      let validFrame3Id = null;
+
+      if (frameId === 2 || frameId >= 4) {
         const frame1 = cs.storyboard.find(f => f.id === 1);
         if (frame1?.imageAsset) {
-          const validFrame1Id = await ensureRegisteredAsset(frame1.imageAsset, 'koc_scene_1.jpg');
-          if (validFrame1Id && !refs.includes(validFrame1Id)) {
-            refs.push(validFrame1Id);
-          }
+          validFrame1Id = await ensureRegisteredAsset(frame1.imageAsset, 'koc_scene_1.jpg');
+        }
+      }
+      if (frameId === 3) {
+        const frame2 = cs.storyboard.find(f => f.id === 2);
+        if (frame2?.imageAsset) {
+          validFrame2Id = await ensureRegisteredAsset(frame2.imageAsset, 'koc_scene_2.jpg');
         }
       }
       if (frameId >= 4) {
         const frame3 = cs.storyboard.find(f => f.id === 3);
         if (frame3?.imageAsset) {
-          const validFrame3Id = await ensureRegisteredAsset(frame3.imageAsset, 'koc_scene_3.jpg');
-          if (validFrame3Id && !refs.includes(validFrame3Id)) {
-            refs.push(validFrame3Id);
-          }
+          validFrame3Id = await ensureRegisteredAsset(frame3.imageAsset, 'koc_scene_3.jpg');
         }
       }
+
+      const refs = getFashionSceneReferenceIds(frameId, validKocId, validOutfitId, validFrame1Id, validFrame2Id, validFrame3Id);
 
       const qApi = window.aiforge?.queue || window.aivideo?.queue;
       if (!qApi?.addJobs && !qApi?.addJob) throw new Error("Hệ thống Queue chưa sẵn sàng");
 
       const liveSessions = (window.aiforge?.browser?.listSessions?.() || window.aivideo?.browser?.listSessions?.() || []);
       const effectiveAccs = (accounts && accounts.length > 0) ? accounts : liveSessions;
-      const isAutoBanana = !selectedBananaAccountId || selectedBananaAccountId === 'auto';
-      let activeBananaAccs = effectiveAccs.filter(a => (a.providerId === 'banana' || a.provider === 'Banana') && (a.authStatus === 'Logged In' || a.authStatus === 'active' || !a.disabled));
-      if (activeBananaAccs.length === 0) activeBananaAccs = effectiveAccs.filter(a => a.providerId === 'banana' || a.provider === 'Banana');
-      if (activeBananaAccs.length === 0) activeBananaAccs = accounts.filter(a => a.providerId === 'banana');
-      let curBananaAcc = undefined;
-      let isManualBanana = false;
-      if (!isAutoBanana) {
-        curBananaAcc = accounts.find(a => a.accountId === selectedBananaAccountId);
-        isManualBanana = !!curBananaAcc;
-      }
-      if (!curBananaAcc && activeBananaAccs.length > 0) {
-        window.__aiforge_koc_single_banana_counter = (window.__aiforge_koc_single_banana_counter || 0) + 1;
-        curBananaAcc = activeBananaAccs[(window.__aiforge_koc_single_banana_counter - 1) % activeBananaAccs.length];
-        isManualBanana = false;
-      }
-      const targetAccId = curBananaAcc?.accountId || undefined;
-      const targetAccName = curBananaAcc?.accountDisplayName || curBananaAcc?.accountEmail || curBananaAcc?.accountName || undefined;
+      const curEng = (cs.imageEngine || imageEngine || 'muse');
+      const isM = curEng === 'muse';
+      window.__aiforge_koc_single_banana_counter = (window.__aiforge_koc_single_banana_counter || 0) + 1;
+      const accInfo = resolveFashionImageAccount(curEng, selectedBananaAccountId, window.__aiforge_koc_single_banana_counter - 1);
+      const targetAccId = accInfo.accountId;
+      const targetAccName = accInfo.accountName;
+      const isManualBanana = accInfo.isManual;
 
       const jobInput = {
         title: `[KOC Thời Trang] Storyboard Cảnh ${frameId}`,
         type: "Image",
-        providerId: "banana",
-        provider: "Banana",
+        providerId: isM ? "muse" : "banana",
+        provider: isM ? "Muse AI" : "Banana",
         autoRemoveWatermark: cs.removeWatermark === true,
         removeWatermark: cs.removeWatermark === true,
         ...(targetAccId ? { accountId: targetAccId, account: targetAccName } : {}),
         payload: {
           title: `[KOC Thời Trang] Storyboard Cảnh ${frameId}`,
-          prompt: finalPrompt,
+          prompt: isM && !finalPrompt.toLowerCase().startsWith('tạo ảnh') ? `Tạo ảnh 9:16: ${finalPrompt}` : finalPrompt,
           ratio: "9:16",
           aspectRatio: "9:16",
           referenceAssetIds: refs,
-          model: "banana",
-          modelDisplayName: "🍌 Nano Banana Pro",
+          referenceLocalPaths: refLocalPaths,
+          model: isM ? "muse-image" : "banana",
+          modelDisplayName: isM ? "⚡ Muse AI" : "🍌 Nano Banana Pro",
           studioSource: "video-factory",
           removeWatermark: cs.removeWatermark === true,
           autoRemoveWatermark: cs.removeWatermark === true,
@@ -1352,7 +1633,37 @@ function FashionKocProStudio({
     }
   };
 
-  // 1. TẠO 7 CẢNH ẢNH (QUY TRÌNH CHUỖI 4 CẤP: CẢNH 1 MỎ NEO -> CẢNH 2,3 -> CẢNH 4-7 NỐI CẢNH 3)
+  // 🎯 BỘ PHÂN GIẢI TÀI KHOẢN TẠO ẢNH ĐA NĂNG (HỖ TRỢ CẢ MUSE AI & BANANA PRO)
+  const resolveFashionImageAccount = (engine, selectedAccId, idx = 0) => {
+    const isMuse = engine === 'muse';
+    const liveSessions = (window.aiforge?.browser?.listSessions?.() || window.aivideo?.browser?.listSessions?.() || []);
+    const all = (accounts && accounts.length > 0) ? accounts : liveSessions;
+    let pool = all.filter(a => isMuse ? 
+      (a.providerId === 'muse' || (a.provider && a.provider.toLowerCase().includes('muse'))) : 
+      (a.providerId === 'banana' || a.provider === 'Banana')
+    );
+    const active = pool.filter(a => a.authStatus === 'Logged In' || a.authStatus === 'active' || !a.disabled);
+    const finalPool = active.length > 0 ? active : pool;
+
+    const isAuto = !selectedAccId || selectedAccId === 'auto';
+    let curAcc = undefined;
+    let isManual = false;
+    if (!isAuto) {
+      curAcc = all.find(a => a.accountId === selectedAccId);
+      isManual = !!curAcc;
+    }
+    if (!curAcc && finalPool.length > 0) {
+      curAcc = finalPool[idx % finalPool.length];
+      isManual = false;
+    }
+    return {
+      accountId: curAcc?.accountId || undefined,
+      accountName: curAcc?.accountDisplayName || curAcc?.accountEmail || curAcc?.accountName || undefined,
+      isManual
+    };
+  };
+
+  // 1. TẠO 7 CẢNH ẢNH (QUY TRÌNH CHUỖI NỐI TIẾP: C1 -> C2 -> C3 -> C4..7)
   const generateAllImages = async () => {
     const cs = stateRef.current;
     if (!cs.koc || !cs.outfit) {
@@ -1360,13 +1671,17 @@ function FashionKocProStudio({
       return;
     }
 
+    dispatchLocksRef.current = { anchor1: false, anchor2: false, anchor3: false };
+    window.__AIFORGE_FASHION_BATCH_ACTIVE__ = true;
+    setIsGeneratingImages(true);
+
     const now = Date.now();
     const frame1 = cs.storyboard.find(f => f.id === 1);
+    const frame2 = cs.storyboard.find(f => f.id === 2);
     const frame3 = cs.storyboard.find(f => f.id === 3);
-    const hasFrame1Asset = Boolean(frame1?.imageAsset);
-    const hasFrame3Asset = Boolean(frame3?.imageAsset);
-
-    setIsGeneratingImages(true);
+    const hasFrame1Asset = Boolean(getKocMediaUrl(frame1?.imageAsset));
+    const hasFrame2Asset = Boolean(getKocMediaUrl(frame2?.imageAsset));
+    const hasFrame3Asset = Boolean(getKocMediaUrl(frame3?.imageAsset));
 
     try {
       const validKocId = await ensureRegisteredAsset(cs.koc, 'koc_face.jpg');
@@ -1381,67 +1696,54 @@ function FashionKocProStudio({
       const qApi = window.aiforge?.queue || window.aivideo?.queue;
       if (!qApi?.addJobs && !qApi?.addJob) throw new Error("Hệ thống Queue chưa sẵn sàng");
 
-      const isAutoBanana = !selectedBananaAccountId || selectedBananaAccountId === 'auto';
-      const liveSessionsAll = (window.aiforge?.browser?.listSessions?.() || window.aivideo?.browser?.listSessions?.() || []);
-      const effectiveAccsAll = (accounts && accounts.length > 0) ? accounts : liveSessionsAll;
-      let activeBananaAccs = effectiveAccsAll.filter(a => (a.providerId === 'banana' || a.provider === 'Banana') && (a.authStatus === 'Logged In' || a.authStatus === 'active' || !a.disabled));
-      if (activeBananaAccs.length === 0) activeBananaAccs = effectiveAccsAll.filter(a => a.providerId === 'banana' || a.provider === 'Banana');
-      let manualBananaAcc = !isAutoBanana ? effectiveAccsAll.find(a => a.accountId === selectedBananaAccountId) : undefined;
+      const helperCreateJob = (frame, refs, idx = 0) => {
+        const curEng = (cs.imageEngine || imageEngine || 'muse');
+        const isM = curEng === 'muse';
+        const accInfo = resolveFashionImageAccount(curEng, selectedBananaAccountId, idx);
+        const targetAccId = accInfo.accountId;
+        const targetAccName = accInfo.accountName;
+        const isManual = accInfo.isManual;
+        const finalPrompt = buildSceneImagePrompt(frame.imagePrompt, cs.creativeDirection, cs.technicalStyle);
 
-      // TRƯỜNG HỢP 1: CẢ CẢNH 1 VÀ CẢNH 3 ĐỀU ĐÃ CÓ ẢNH -> NẠP CẢ 7 CẢNH VỚI ĐỦ MỎ NEO!
-      if (hasFrame1Asset && hasFrame3Asset) {
+        return {
+          title: `[KOC Thời Trang] Storyboard Cảnh ${frame.id}`,
+          type: "Image",
+          providerId: isM ? "muse" : "banana",
+          provider: isM ? "Muse AI" : "Banana",
+          autoRemoveWatermark: cs.removeWatermark === true,
+          removeWatermark: cs.removeWatermark === true,
+          ...(targetAccId ? { accountId: targetAccId, account: targetAccName } : {}),
+          payload: {
+            title: `[KOC Thời Trang] Storyboard Cảnh ${frame.id}`,
+            prompt: isM && !finalPrompt.toLowerCase().startsWith('tạo ảnh') ? `Tạo ảnh 9:16: ${finalPrompt}` : finalPrompt,
+            ratio: "9:16",
+            aspectRatio: "9:16",
+            referenceAssetIds: refs,
+            model: isM ? "muse-image" : "banana",
+            modelDisplayName: isM ? "⚡ Muse AI" : "🍌 Nano Banana Pro",
+            studioSource: "video-factory",
+            removeWatermark: cs.removeWatermark === true,
+            autoRemoveWatermark: cs.removeWatermark === true,
+            upsampleResolution: cs.imageResolution === '2k' ? '2K' : 'Full HD',
+            resolution: cs.imageResolution === '2k' ? '2K' : 'Standard',
+            quality: cs.imageResolution === '2k' ? '2K' : 'Standard',
+            imageResolution: cs.imageResolution,
+            upscale2k: cs.imageResolution === '2k',
+            accountSelection: isManual ? "manual" : "auto"
+          }
+        };
+      };
+
+      // TRƯỜNG HỢP 1: CẢ CẢNH 1, 2, 3 ĐỀU ĐÃ CÓ ẢNH -> NẠP CẢ 7 CẢNH VỚI ĐỦ MỎ NEO!
+      if (hasFrame1Asset && hasFrame2Asset && hasFrame3Asset) {
         const validFrame1Id = await ensureRegisteredAsset(frame1.imageAsset, 'koc_scene_1.jpg');
+        const validFrame2Id = await ensureRegisteredAsset(frame2.imageAsset, 'koc_scene_2.jpg');
         const validFrame3Id = await ensureRegisteredAsset(frame3.imageAsset, 'koc_scene_3.jpg');
-        toast?.info?.("🚀 Đang sản xuất toàn bộ 7 cảnh với đầy đủ chuỗi mỏ neo Cảnh 1 & Cảnh 3...");
+        toast?.info?.("🚀 Đang sản xuất toàn bộ 7 cảnh với đầy đủ chuỗi mỏ neo Cảnh 1, 2 & 3...");
 
         const jobs = cs.storyboard.map((frame, idx) => {
-          let curAcc = undefined;
-          let isManual = false;
-          if (manualBananaAcc) {
-            curAcc = manualBananaAcc;
-            isManual = true;
-          } else if (activeBananaAccs.length > 0) {
-            // 🎯 ROUND-ROBIN BANANA: Chia đều ảnh cho từng tài khoản (2 acc -> 50/50, 3 acc -> chia 3)
-            curAcc = activeBananaAccs[idx % activeBananaAccs.length];
-            isManual = false;
-          }
-          const targetAccId = curAcc?.accountId || undefined;
-          const targetAccName = curAcc?.accountDisplayName || curAcc?.accountEmail || curAcc?.accountName || undefined;
-          const finalPrompt = buildSceneImagePrompt(frame.imagePrompt, cs.creativeDirection, cs.technicalStyle);
-          const refs = [validKocId, validOutfitId];
-          if (frame.id > 1 && validFrame1Id) {
-            refs.push(validFrame1Id);
-          }
-          if (frame.id >= 4 && validFrame3Id) {
-            refs.push(validFrame3Id);
-          }
-          return {
-            title: `[KOC Thời Trang] Storyboard Cảnh ${frame.id}`,
-            type: "Image",
-            providerId: "banana",
-            provider: "Banana",
-            autoRemoveWatermark: cs.removeWatermark === true,
-            removeWatermark: cs.removeWatermark === true,
-            ...(targetAccId ? { accountId: targetAccId } : {}),
-            payload: {
-              title: `[KOC Thời Trang] Storyboard Cảnh ${frame.id}`,
-              prompt: finalPrompt,
-              ratio: "9:16",
-              aspectRatio: "9:16",
-              referenceAssetIds: refs,
-              model: "banana",
-              modelDisplayName: "🍌 Nano Banana Pro",
-              studioSource: "video-factory",
-              removeWatermark: cs.removeWatermark === true,
-              autoRemoveWatermark: cs.removeWatermark === true,
-              upsampleResolution: cs.imageResolution === '2k' ? '2K' : 'Full HD',
-              resolution: cs.imageResolution === '2k' ? '2K' : 'Standard',
-              quality: cs.imageResolution === '2k' ? '2K' : 'Standard',
-              imageResolution: cs.imageResolution,
-              upscale2k: cs.imageResolution === '2k',
-              accountSelection: isManual ? "manual" : "auto"
-            }
-          };
+          const refs = getFashionSceneReferenceIds(frame.id, validKocId, validOutfitId, validFrame1Id, validFrame2Id, validFrame3Id);
+          return helperCreateJob(frame, refs, idx);
         });
 
         setStoryboard(prev => prev.map(f => ({
@@ -1463,57 +1765,17 @@ function FashionKocProStudio({
         })));
 
         toast?.success?.("Đã nạp chuỗi 7 cảnh ảnh thành công!");
-      } else if (hasFrame1Asset && !hasFrame3Asset) {
-        // TRƯỜNG HỢP 2: ĐÃ CÓ CẢNH 1, CHƯA CÓ CẢNH 3: NẠP CẢNH 2 & 3, CẢNH 4-7 CHỜ CẢNH 3
-        const validFrame1Id = await ensureRegisteredAsset(frame1.imageAsset, 'koc_scene_1.jpg');
-        toast?.info?.("🚀 Cảnh 1 đã có! Đang nạp Cảnh 2 & 3 (Cảnh 4-7 sẽ tự động nạp ngay khi Cảnh 3 xong)...");
+      } else if (hasFrame1Asset && hasFrame2Asset && !hasFrame3Asset) {
+        // TRƯỜNG HỢP 2: ĐÃ CÓ CẢNH 1 & 2, CHƯA CÓ CẢNH 3: NẠP CẢNH 3 (REFS: KOC + OUTFIT + CẢNH 2), CẢNH 4-7 CHỜ CẢNH 3
+        const validFrame2Id = await ensureRegisteredAsset(frame2.imageAsset, 'koc_scene_2.jpg');
+        toast?.info?.("🚀 Đã có Cảnh 1 & 2! Đang nạp Cảnh 3 (Cảnh 4-7 sẽ tự động nạp ngay khi Cảnh 3 xong)...");
 
-        const targetFrames = cs.storyboard.filter(f => f.id === 2 || f.id === 3);
-        const jobs = targetFrames.map((frame, idx) => {
-          let curAcc = undefined;
-          let isManual = false;
-          if (manualBananaAcc) {
-            curAcc = manualBananaAcc;
-            isManual = true;
-          } else if (activeBananaAccs.length > 0) {
-            curAcc = activeBananaAccs[idx % activeBananaAccs.length];
-            isManual = false;
-          }
-          const targetAccId = curAcc?.accountId || undefined;
-          const targetAccName = curAcc?.accountDisplayName || curAcc?.accountEmail || curAcc?.accountName || undefined;
-          const finalPrompt = buildSceneImagePrompt(frame.imagePrompt, cs.creativeDirection, cs.technicalStyle);
-          const refs = [validKocId, validOutfitId, validFrame1Id].filter(Boolean);
-          return {
-            title: `[KOC Thời Trang] Storyboard Cảnh ${frame.id}`,
-            type: "Image",
-            providerId: "banana",
-            provider: "Banana",
-            autoRemoveWatermark: cs.removeWatermark === true,
-            removeWatermark: cs.removeWatermark === true,
-            ...(targetAccId ? { accountId: targetAccId } : {}),
-            payload: {
-              title: `[KOC Thời Trang] Storyboard Cảnh ${frame.id}`,
-              prompt: finalPrompt,
-              ratio: "9:16",
-              aspectRatio: "9:16",
-              referenceAssetIds: refs,
-              model: "banana",
-              modelDisplayName: "🍌 Nano Banana Pro",
-              studioSource: "video-factory",
-              removeWatermark: cs.removeWatermark === true,
-              autoRemoveWatermark: cs.removeWatermark === true,
-              upsampleResolution: cs.imageResolution === '2k' ? '2K' : 'Full HD',
-              resolution: cs.imageResolution === '2k' ? '2K' : 'Standard',
-              quality: cs.imageResolution === '2k' ? '2K' : 'Standard',
-              imageResolution: cs.imageResolution,
-              upscale2k: cs.imageResolution === '2k',
-              accountSelection: isManual ? "manual" : "auto"
-            }
-          };
-        });
+        const targetFrame3 = cs.storyboard.find(f => f.id === 3) || cs.storyboard[2];
+        const refs3 = getFashionSceneReferenceIds(3, validKocId, validOutfitId, null, validFrame2Id, null);
+        const job3 = helperCreateJob(targetFrame3, refs3, 0);
 
         setStoryboard(prev => prev.map(f => {
-          if (f.id === 2 || f.id === 3) {
+          if (f.id === 3) {
             return { ...f, imageAsset: null, imageStatus: "generating", imageProgress: 20, imageRunStartTime: now };
           }
           if (f.id >= 4) {
@@ -1522,62 +1784,267 @@ function FashionKocProStudio({
           return f;
         }));
 
-        const res = await (qApi.addJobs ? qApi.addJobs(jobs) : Promise.all(jobs.map(j => qApi.addJob(j))));
+        const res = await (qApi.addJobs ? qApi.addJobs([job3]) : qApi.addJob(job3));
         try { qApi.resume?.(); } catch(_) {}
 
-        const jobResults = Array.isArray(res) ? res : (res?.results || []);
+        const jId = res?.results?.[0]?.job?.id || res?.results?.[0]?.id || res?.id || res?.jobId || null;
+        updateFrame(3, { imageJobId: jId, imageStatus: "generating", imageProgress: 20 });
+      } else if (hasFrame1Asset && !hasFrame2Asset) {
+        // TRƯỜNG HỢP 3: ĐÃ CÓ CẢNH 1, CHƯA CÓ CẢNH 2: NẠP CẢNH 2 (REFS: KOC + OUTFIT + CẢNH 1), CẢNH 3 CHỜ CẢNH 2, CẢNH 4-7 CHỜ CẢNH 3
+        const validFrame1Id = await ensureRegisteredAsset(frame1.imageAsset, 'koc_scene_1.jpg');
+        toast?.info?.("🚀 Đã có Cảnh 1! Đang nạp Cảnh 2 (Cảnh 3 chờ C2, Cảnh 4-7 chờ C3)...");
+
+        const targetFrame2 = cs.storyboard.find(f => f.id === 2) || cs.storyboard[1];
+        const refs2 = getFashionSceneReferenceIds(2, validKocId, validOutfitId, validFrame1Id, null, null);
+        const job2 = helperCreateJob(targetFrame2, refs2, 0);
+
         setStoryboard(prev => prev.map(f => {
-          const idx = targetFrames.findIndex(tf => tf.id === f.id);
-          if (idx !== -1) {
-            return { ...f, imageJobId: jobResults[idx]?.job?.id || jobResults[idx]?.id || null, imageStatus: "generating", imageProgress: 20 };
+          if (f.id === 2) {
+            return { ...f, imageAsset: null, imageStatus: "generating", imageProgress: 20, imageRunStartTime: now };
+          }
+          if (f.id === 3) {
+            return { ...f, imageAsset: null, imageStatus: "waiting_anchor_2", imageProgress: 0, imageRunStartTime: now };
+          }
+          if (f.id >= 4) {
+            return { ...f, imageAsset: null, imageStatus: "waiting_anchor_3", imageProgress: 0, imageRunStartTime: now };
           }
           return f;
         }));
+
+        const res = await (qApi.addJobs ? qApi.addJobs([job2]) : qApi.addJob(job2));
+        try { qApi.resume?.(); } catch(_) {}
+
+        const jId = res?.results?.[0]?.job?.id || res?.results?.[0]?.id || res?.id || res?.jobId || null;
+        updateFrame(2, { imageJobId: jId, imageStatus: "generating", imageProgress: 20 });
       } else {
-        // TRƯỜNG HỢP 3: CHƯA CÓ CẢNH 1: TẠO CẢNH 1 TRƯỚC (CẢNH 2, 3 CHỜ C1; CẢNH 4-7 CHỜ C3)
+        // TRƯỜNG HỢP 4: CHƯA CÓ CẢNH 1: TẠO CẢNH 1 TRƯỚC (REFS: 1 KOC GỐC + 1 OUTFIT GỐC), CẢNH 2 CHỜ C1, CẢNH 3 CHỜ C2, CẢNH 4-7 CHỜ C3
         toast?.info?.("⚓ Đang tạo Cảnh 1 làm mỏ neo bối cảnh... Các cảnh sau sẽ tự động nối chuỗi lần lượt!");
 
         setStoryboard(prev => prev.map(f => {
           if (f.id === 1) {
             return { ...f, imageAsset: null, imageStatus: "generating", imageProgress: 20, imageRunStartTime: now };
           }
-          if (f.id === 2 || f.id === 3) {
+          if (f.id === 2) {
             return { ...f, imageAsset: null, imageStatus: "waiting_anchor_1", imageProgress: 0, imageRunStartTime: now };
+          }
+          if (f.id === 3) {
+            return { ...f, imageAsset: null, imageStatus: "waiting_anchor_2", imageProgress: 0, imageRunStartTime: now };
           }
           return { ...f, imageAsset: null, imageStatus: "waiting_anchor_3", imageProgress: 0, imageRunStartTime: now };
         }));
 
-        let curAcc = undefined;
-        let isManual = false;
-        if (manualBananaAcc) {
-          curAcc = manualBananaAcc;
-          isManual = true;
-        } else if (activeBananaAccs.length > 0) {
-          window.__aiforge_koc_single_banana_counter = (window.__aiforge_koc_single_banana_counter || 0) + 1;
-          curAcc = activeBananaAccs[(window.__aiforge_koc_single_banana_counter - 1) % activeBananaAccs.length];
-          isManual = false;
-        }
-        const targetAccId = curAcc?.accountId || undefined;
-        const targetAccName = curAcc?.accountDisplayName || curAcc?.accountEmail || curAcc?.accountName || undefined;
+        const targetFrame1 = cs.storyboard.find(f => f.id === 1) || cs.storyboard[0];
+        // 🎯 Cảnh 1 chỉ nạp 1 ảnh tham chiếu KOC gốc và 1 ảnh Outfit gốc
+        const refs1 = getFashionSceneReferenceIds(1, validKocId, validOutfitId, null, null, null);
+        const f1Job = helperCreateJob(targetFrame1, refs1, 0);
 
-        const f1Prompt = buildSceneImagePrompt(cs.storyboard[0].imagePrompt, cs.creativeDirection, cs.technicalStyle);
-        const f1Job = {
-          title: `[KOC Thời Trang] Storyboard Cảnh 1`,
+        const res = await (qApi.addJobs ? qApi.addJobs([f1Job]) : qApi.addJob(f1Job));
+        try { qApi.resume?.(); } catch(_) {}
+
+        const jId = res?.results?.[0]?.job?.id || res?.results?.[0]?.id || res?.id || res?.jobId || null;
+        updateFrame(1, { imageJobId: jId, imageStatus: "generating", imageProgress: 25 });
+      }
+    } catch (err) {
+      console.error("Lỗi nạp batch ảnh:", err);
+      toast?.error?.("Lỗi nạp ảnh: " + (err?.message || err));
+      setIsGeneratingImages(false);
+      window.__AIFORGE_FASHION_BATCH_ACTIVE__ = false;
+    }
+  };
+
+  // 🎯 TỰ ĐỘNG NỐI CHUỖI CẢNH 2 KHI CẢNH 1 VỪA HOÀN THÀNH (REFS: KOC GỐC + OUTFIT GỐC + CẢNH 1)
+  const dispatchScenesWaitingAnchor1 = async (frame1Asset) => {
+    const cs = stateRef.current;
+    const waitingScene = cs.storyboard.find(f => f.id === 2 && (f.imageStatus === "waiting_anchor_1" || f.imageStatus === "waiting_anchor"));
+    if (!waitingScene) return;
+
+    const effectiveFrame1Asset = frame1Asset || cs.storyboard.find(f => f.id === 1)?.imageAsset;
+    if (!effectiveFrame1Asset) return;
+
+    try {
+      const qApi = window.aiforge?.queue || window.aivideo?.queue;
+      if (!qApi?.addJobs && !qApi?.addJob) return;
+
+      const validKocId = await ensureRegisteredAsset(cs.koc, 'koc_face.jpg');
+      const validOutfitId = await ensureRegisteredAsset(cs.outfit, 'outfit_sample.jpg');
+      const validFrame1Id = await ensureRegisteredAsset(effectiveFrame1Asset, 'koc_scene_1.jpg');
+
+      // 🎯 Cảnh 2 chỉ nạp 1 ảnh KOC gốc, 1 ảnh Outfit gốc và 1 ảnh Cảnh 1
+      const refs = getFashionSceneReferenceIds(2, validKocId, validOutfitId, validFrame1Id, null, null);
+      const refLocalPaths = [cs.koc?.localPath, cs.outfit?.localPath, effectiveFrame1Asset?.localPath].filter(Boolean);
+
+      const curEng = (cs.imageEngine || imageEngine || 'muse');
+      const isM = curEng === 'muse';
+      const accInfo = resolveFashionImageAccount(curEng, selectedBananaAccountId, 1);
+      const targetAccId = accInfo.accountId;
+      const targetAccName = accInfo.accountName;
+      const isManual = accInfo.isManual;
+      const finalPrompt = buildSceneImagePrompt(waitingScene.imagePrompt, cs.creativeDirection, cs.technicalStyle);
+
+      const job = {
+        title: `[KOC Thời Trang] Storyboard Cảnh 2`,
+        type: "Image",
+        providerId: isM ? "muse" : "banana",
+        provider: isM ? "Muse AI" : "Banana",
+        autoRemoveWatermark: cs.removeWatermark === true,
+        removeWatermark: cs.removeWatermark === true,
+        ...(targetAccId ? { accountId: targetAccId, account: targetAccName } : {}),
+        payload: {
+          title: `[KOC Thời Trang] Storyboard Cảnh 2`,
+          prompt: isM && !finalPrompt.toLowerCase().startsWith('tạo ảnh') ? `Tạo ảnh 9:16: ${finalPrompt}` : finalPrompt,
+          ratio: "9:16",
+          aspectRatio: "9:16",
+          referenceAssetIds: refs,
+          model: isM ? "muse-image" : "banana",
+          modelDisplayName: isM ? "⚡ Muse AI" : "🍌 Nano Banana Pro",
+          studioSource: "video-factory",
+          removeWatermark: cs.removeWatermark === true,
+          autoRemoveWatermark: cs.removeWatermark === true,
+          upsampleResolution: cs.imageResolution === '2k' ? '2K' : 'Full HD',
+          resolution: cs.imageResolution === '2k' ? '2K' : 'Standard',
+          quality: cs.imageResolution === '2k' ? '2K' : 'Standard',
+          imageResolution: cs.imageResolution,
+          upscale2k: cs.imageResolution === '2k',
+          accountSelection: isManual ? "manual" : "auto"
+        }
+      };
+
+      const now = Date.now();
+      updateFrame(2, { imageStatus: "generating", imageProgress: 20, imageRunStartTime: now });
+
+      const res = await (qApi.addJobs ? qApi.addJobs([job]) : qApi.addJob(job));
+      try { qApi.resume?.(); } catch(_) {}
+
+      const jId = res?.results?.[0]?.job?.id || res?.results?.[0]?.id || res?.id || res?.jobId || null;
+      updateFrame(2, { imageJobId: jId, imageStatus: "generating", imageProgress: 20 });
+
+      toast?.success?.("⚓ Cảnh 1 đã có mỏ neo! Đang tự động nạp Cảnh 02...");
+    } catch (err) {
+      console.error("Lỗi dispatch scenes anchor 1:", err);
+    }
+  };
+
+  // 🎯 TỰ ĐỘNG NỐI CHUỖI CẢNH 3 KHI CẢNH 2 VỪA HOÀN THÀNH (REFS: KOC GỐC + OUTFIT GỐC + CẢNH 2)
+  const dispatchScenesWaitingAnchor2 = async (frame2Asset) => {
+    const cs = stateRef.current;
+    const waitingScene = cs.storyboard.find(f => f.id === 3 && (f.imageStatus === "waiting_anchor_2" || f.imageStatus === "waiting_anchor"));
+    if (!waitingScene) return;
+
+    const effectiveFrame2Asset = frame2Asset || cs.storyboard.find(f => f.id === 2)?.imageAsset;
+    if (!effectiveFrame2Asset) return;
+
+    try {
+      const qApi = window.aiforge?.queue || window.aivideo?.queue;
+      if (!qApi?.addJobs && !qApi?.addJob) return;
+
+      const validKocId = await ensureRegisteredAsset(cs.koc, 'koc_face.jpg');
+      const validOutfitId = await ensureRegisteredAsset(cs.outfit, 'outfit_sample.jpg');
+      const validFrame2Id = await ensureRegisteredAsset(effectiveFrame2Asset, 'koc_scene_2.jpg');
+
+      // 🎯 Cảnh 3 chỉ nạp 1 ảnh KOC gốc, 1 ảnh Outfit gốc và 1 ảnh Cảnh 2
+      const refs = getFashionSceneReferenceIds(3, validKocId, validOutfitId, null, validFrame2Id, null);
+      const refLocalPaths = [cs.koc?.localPath, cs.outfit?.localPath, effectiveFrame2Asset?.localPath].filter(Boolean);
+
+      const curEng = (cs.imageEngine || imageEngine || 'muse');
+      const isM = curEng === 'muse';
+      const accInfo = resolveFashionImageAccount(curEng, selectedBananaAccountId, 2);
+      const targetAccId = accInfo.accountId;
+      const targetAccName = accInfo.accountName;
+      const isManual = accInfo.isManual;
+      const finalPrompt = buildSceneImagePrompt(waitingScene.imagePrompt, cs.creativeDirection, cs.technicalStyle);
+
+      const job = {
+        title: `[KOC Thời Trang] Storyboard Cảnh 3`,
+        type: "Image",
+        providerId: isM ? "muse" : "banana",
+        provider: isM ? "Muse AI" : "Banana",
+        autoRemoveWatermark: cs.removeWatermark === true,
+        removeWatermark: cs.removeWatermark === true,
+        ...(targetAccId ? { accountId: targetAccId, account: targetAccName } : {}),
+        payload: {
+          title: `[KOC Thời Trang] Storyboard Cảnh 3`,
+          prompt: isM && !finalPrompt.toLowerCase().startsWith('tạo ảnh') ? `Tạo ảnh 9:16: ${finalPrompt}` : finalPrompt,
+          ratio: "9:16",
+          aspectRatio: "9:16",
+          referenceAssetIds: refs,
+          model: isM ? "muse-image" : "banana",
+          modelDisplayName: isM ? "⚡ Muse AI" : "🍌 Nano Banana Pro",
+          studioSource: "video-factory",
+          removeWatermark: cs.removeWatermark === true,
+          autoRemoveWatermark: cs.removeWatermark === true,
+          upsampleResolution: cs.imageResolution === '2k' ? '2K' : 'Full HD',
+          resolution: cs.imageResolution === '2k' ? '2K' : 'Standard',
+          quality: cs.imageResolution === '2k' ? '2K' : 'Standard',
+          imageResolution: cs.imageResolution,
+          upscale2k: cs.imageResolution === '2k',
+          accountSelection: isManual ? "manual" : "auto"
+        }
+      };
+
+      const now = Date.now();
+      updateFrame(3, { imageStatus: "generating", imageProgress: 20, imageRunStartTime: now });
+
+      const res = await (qApi.addJobs ? qApi.addJobs([job]) : qApi.addJob(job));
+      try { qApi.resume?.(); } catch(_) {}
+
+      const jId = res?.results?.[0]?.job?.id || res?.results?.[0]?.id || res?.id || res?.jobId || null;
+      updateFrame(3, { imageJobId: jId, imageStatus: "generating", imageProgress: 20 });
+
+      toast?.success?.("🎬 Cảnh 2 đã có mỏ neo! Đang tự động nạp Cảnh 03...");
+    } catch (err) {
+      console.error("Lỗi dispatch scenes anchor 2:", err);
+    }
+  };
+
+  // 🎯 TỰ ĐỘNG NỐI CHUỖI CẢNH 4, 5, 6, 7 KHI CẢNH 3 VỪA HOÀN THÀNH (REFS: KOC GỐC + OUTFIT GỐC + CẢNH 3 + CẢNH 1)
+  const dispatchScenesWaitingAnchor3 = async (frame3Asset) => {
+    const cs = stateRef.current;
+    const waitingScenes = cs.storyboard.filter(f => f.id >= 4 && (f.imageStatus === "waiting_anchor_3" || f.imageStatus === "waiting_anchor"));
+    if (waitingScenes.length === 0) return;
+
+    const effectiveFrame3Asset = frame3Asset || cs.storyboard.find(f => f.id === 3)?.imageAsset;
+    if (!effectiveFrame3Asset) return;
+
+    try {
+      const qApi = window.aiforge?.queue || window.aivideo?.queue;
+      if (!qApi?.addJobs && !qApi?.addJob) return;
+
+      const validKocId = await ensureRegisteredAsset(cs.koc, 'koc_face.jpg');
+      const validOutfitId = await ensureRegisteredAsset(cs.outfit, 'outfit_sample.jpg');
+      
+      const frame1 = cs.storyboard.find(f => f.id === 1);
+      const validFrame1Id = frame1?.imageAsset ? await ensureRegisteredAsset(frame1.imageAsset, 'koc_scene_1.jpg') : null;
+      const validFrame3Id = await ensureRegisteredAsset(effectiveFrame3Asset, 'koc_scene_3.jpg');
+
+      // 🎯 Cảnh 4..7 chỉ nạp 1 ảnh KOC gốc, 1 ảnh Outfit gốc, 1 ảnh Cảnh 3 và 1 ảnh Cảnh 1
+      const refs = getFashionSceneReferenceIds(4, validKocId, validOutfitId, validFrame1Id, null, validFrame3Id);
+      const refLocalPaths = [cs.koc?.localPath, cs.outfit?.localPath, frame1?.imageAsset?.localPath, effectiveFrame3Asset?.localPath].filter(Boolean);
+
+      const curEng = (cs.imageEngine || imageEngine || 'muse');
+      const isM = curEng === 'muse';
+
+      const jobs = waitingScenes.map((frame, idx) => {
+        const accInfo = resolveFashionImageAccount(curEng, selectedBananaAccountId, idx + 3);
+        const targetAccId = accInfo.accountId;
+        const targetAccName = accInfo.accountName;
+        const isManual = accInfo.isManual;
+        const finalPrompt = buildSceneImagePrompt(frame.imagePrompt, cs.creativeDirection, cs.technicalStyle);
+        return {
+          title: `[KOC Thời Trang] Storyboard Cảnh ${frame.id}`,
           type: "Image",
-          providerId: "banana",
-          provider: "Banana",
+          providerId: isM ? "muse" : "banana",
+          provider: isM ? "Muse AI" : "Banana",
           autoRemoveWatermark: cs.removeWatermark === true,
           removeWatermark: cs.removeWatermark === true,
           ...(targetAccId ? { accountId: targetAccId, account: targetAccName } : {}),
           payload: {
-            title: `[KOC Thời Trang] Storyboard Cảnh 1`,
-            prompt: f1Prompt,
+            title: `[KOC Thời Trang] Storyboard Cảnh ${frame.id}`,
+            prompt: isM && !finalPrompt.toLowerCase().startsWith('tạo ảnh') ? `Tạo ảnh 9:16: ${finalPrompt}` : finalPrompt,
             ratio: "9:16",
             aspectRatio: "9:16",
-            // 🎯 CẢNH 1 CHỈ NẠP DUY NHẤT 1 ẢNH THAM CHIẾU LÀ GƯƠNG MẶT KOC (KHÔNG NẠP OUTFIT)
-            referenceAssetIds: [validKocId].filter(Boolean),
-            model: "banana",
-            modelDisplayName: "🍌 Nano Banana Pro",
+            referenceAssetIds: refs,
+            model: isM ? "muse-image" : "banana",
+            modelDisplayName: isM ? "⚡ Muse AI" : "🍌 Nano Banana Pro",
             studioSource: "video-factory",
             removeWatermark: cs.removeWatermark === true,
             autoRemoveWatermark: cs.removeWatermark === true,
@@ -1589,176 +2056,6 @@ function FashionKocProStudio({
             accountSelection: isManual ? "manual" : "auto"
           }
         };
-
-        const res = await (qApi.addJobs ? qApi.addJobs([f1Job]) : qApi.addJob(f1Job));
-        try { qApi.resume?.(); } catch(_) {}
-
-        const jId = res?.results?.[0]?.job?.id || res?.results?.[0]?.id || res?.id || res?.jobId || null;
-        updateFrame(1, { imageJobId: jId, imageStatus: "generating", imageProgress: 25 });
-      }
-    } catch (err) {
-      console.error("Lỗi nạp batch ảnh:", err);
-      toast?.error?.("Lỗi nạp ảnh: " + (err?.message || err));
-    } finally {
-      setIsGeneratingImages(false);
-    }
-  };
-
-  // 🎯 TỰ ĐỘNG NỐI CHUỖI CẢNH 2 & 3 KHI CẢNH 1 (MỎ NEO BỐI CẢNH) VỪA HOÀN THÀNH
-  const dispatchScenesWaitingAnchor1 = async (frame1Asset) => {
-    const cs = stateRef.current;
-    const waitingScenes = cs.storyboard.filter(f => (f.id === 2 || f.id === 3) && (f.imageStatus === "waiting_anchor_1" || f.imageStatus === "waiting_anchor"));
-    if (waitingScenes.length === 0 || !frame1Asset) return;
-
-    try {
-      const qApi = window.aiforge?.queue || window.aivideo?.queue;
-      if (!qApi?.addJobs && !qApi?.addJob) return;
-
-      const validKocId = await ensureRegisteredAsset(cs.koc, 'koc_face.jpg');
-      const validOutfitId = await ensureRegisteredAsset(cs.outfit, 'outfit_sample.jpg');
-      const validFrame1Id = await ensureRegisteredAsset(frame1Asset, 'koc_scene_1.jpg');
-
-      const refs = [validKocId, validOutfitId, validFrame1Id].filter(Boolean);
-
-      const isAutoBanana = !selectedBananaAccountId || selectedBananaAccountId === 'auto';
-      let activeBananaAccs = accounts.filter(a => a.providerId === 'banana' && (a.authStatus === 'Logged In' || a.authStatus === 'active' || !a.disabled));
-      if (activeBananaAccs.length === 0) activeBananaAccs = accounts.filter(a => a.providerId === 'banana');
-      let manualBananaAcc = !isAutoBanana ? accounts.find(a => a.accountId === selectedBananaAccountId) : undefined;
-
-      const jobs = waitingScenes.map((frame, idx) => {
-        let curAcc = undefined;
-        let isManual = false;
-        if (manualBananaAcc) {
-          curAcc = manualBananaAcc;
-          isManual = true;
-        } else if (activeBananaAccs.length > 0) {
-          curAcc = activeBananaAccs[idx % activeBananaAccs.length];
-          isManual = false;
-        }
-        const targetAccId = curAcc?.accountId || undefined;
-        const targetAccName = curAcc?.accountDisplayName || curAcc?.accountEmail || curAcc?.accountName || undefined;
-        const finalPrompt = buildSceneImagePrompt(frame.imagePrompt, cs.creativeDirection, cs.technicalStyle);
-        return {
-            title: `[KOC Thời Trang] Storyboard Cảnh ${frame.id}`,
-            type: "Image",
-            providerId: "banana",
-            provider: "Banana",
-            autoRemoveWatermark: cs.removeWatermark === true,
-            removeWatermark: cs.removeWatermark === true,
-            ...(targetAccId ? { accountId: targetAccId } : {}),
-            payload: {
-              title: `[KOC Thời Trang] Storyboard Cảnh ${frame.id}`,
-              prompt: finalPrompt,
-              ratio: "9:16",
-              aspectRatio: "9:16",
-              referenceAssetIds: refs,
-              model: "banana",
-              modelDisplayName: "🍌 Nano Banana Pro",
-              studioSource: "video-factory",
-              removeWatermark: cs.removeWatermark === true,
-              autoRemoveWatermark: cs.removeWatermark === true,
-              upsampleResolution: cs.imageResolution === '2k' ? '2K' : 'Full HD',
-              resolution: cs.imageResolution === '2k' ? '2K' : 'Standard',
-              quality: cs.imageResolution === '2k' ? '2K' : 'Standard',
-              imageResolution: cs.imageResolution,
-              upscale2k: cs.imageResolution === '2k',
-              accountSelection: isManual ? "manual" : "auto"
-            }
-          };
-      });
-
-      const now = Date.now();
-      setStoryboard(prev => prev.map(f => (f.id === 2 || f.id === 3) && (f.imageStatus === "waiting_anchor_1" || f.imageStatus === "waiting_anchor") ? {
-        ...f,
-        imageStatus: "generating",
-        imageProgress: 20,
-        imageRunStartTime: now
-      } : f));
-
-      const res = await (qApi.addJobs ? qApi.addJobs(jobs) : Promise.all(jobs.map(j => qApi.addJob(j))));
-      try { qApi.resume?.(); } catch(_) {}
-
-      const jobResults = Array.isArray(res) ? res : (res?.results || []);
-      setStoryboard(prev => prev.map(f => {
-        const idxInWaiting = waitingScenes.findIndex(ws => ws.id === f.id);
-        if (idxInWaiting !== -1) {
-          const jId = jobResults[idxInWaiting]?.job?.id || jobResults[idxInWaiting]?.id || null;
-          return { ...f, imageJobId: jId, imageStatus: "generating", imageProgress: 20 };
-        }
-        return f;
-      }));
-
-      toast?.success?.("⚓ Cảnh 1 đã có mỏ neo! Đang tự động nạp Cảnh 02 & Cảnh 03...");
-    } catch (err) {
-      console.error("Lỗi dispatch scenes anchor 1:", err);
-    }
-  };
-
-  // 🎯 TỰ ĐỘNG NỐI CHUỖI CẢNH 4, 5, 6, 7 KHI CẢNH 3 (MỎ NEO ĐÃ MẶC VÁY) VỪA HOÀN THÀNH
-  const dispatchScenesWaitingAnchor3 = async (frame3Asset) => {
-    const cs = stateRef.current;
-    const waitingScenes = cs.storyboard.filter(f => f.id >= 4 && (f.imageStatus === "waiting_anchor_3" || f.imageStatus === "waiting_anchor"));
-    if (waitingScenes.length === 0 || !frame3Asset) return;
-
-    try {
-      const qApi = window.aiforge?.queue || window.aivideo?.queue;
-      if (!qApi?.addJobs && !qApi?.addJob) return;
-
-      const validKocId = await ensureRegisteredAsset(cs.koc, 'koc_face.jpg');
-      const validOutfitId = await ensureRegisteredAsset(cs.outfit, 'outfit_sample.jpg');
-      
-      const frame1 = cs.storyboard.find(f => f.id === 1);
-      const validFrame1Id = frame1?.imageAsset ? await ensureRegisteredAsset(frame1.imageAsset, 'koc_scene_1.jpg') : null;
-      const validFrame3Id = await ensureRegisteredAsset(frame3Asset, 'koc_scene_3.jpg');
-
-      // 4 ảnh tham chiếu mỏ neo chuẩn Google Flow
-      const refs = [validKocId, validOutfitId, validFrame1Id, validFrame3Id].filter(Boolean);
-
-      const isAutoBanana = !selectedBananaAccountId || selectedBananaAccountId === 'auto';
-      let activeBananaAccs = accounts.filter(a => a.providerId === 'banana' && (a.authStatus === 'Logged In' || a.authStatus === 'active' || !a.disabled));
-      if (activeBananaAccs.length === 0) activeBananaAccs = accounts.filter(a => a.providerId === 'banana');
-      let manualBananaAcc = !isAutoBanana ? accounts.find(a => a.accountId === selectedBananaAccountId) : undefined;
-
-      const jobs = waitingScenes.map((frame, idx) => {
-        let curAcc = undefined;
-        let isManual = false;
-        if (manualBananaAcc) {
-          curAcc = manualBananaAcc;
-          isManual = true;
-        } else if (activeBananaAccs.length > 0) {
-          curAcc = activeBananaAccs[idx % activeBananaAccs.length];
-          isManual = false;
-        }
-        const targetAccId = curAcc?.accountId || undefined;
-        const targetAccName = curAcc?.accountDisplayName || curAcc?.accountEmail || curAcc?.accountName || undefined;
-        const finalPrompt = buildSceneImagePrompt(frame.imagePrompt, cs.creativeDirection, cs.technicalStyle);
-        return {
-            title: `[KOC Thời Trang] Storyboard Cảnh ${frame.id}`,
-            type: "Image",
-            providerId: "banana",
-            provider: "Banana",
-            autoRemoveWatermark: cs.removeWatermark === true,
-            removeWatermark: cs.removeWatermark === true,
-            ...(targetAccId ? { accountId: targetAccId } : {}),
-            payload: {
-              title: `[KOC Thời Trang] Storyboard Cảnh ${frame.id}`,
-              prompt: finalPrompt,
-              ratio: "9:16",
-              aspectRatio: "9:16",
-              referenceAssetIds: refs,
-              model: "banana",
-              modelDisplayName: "🍌 Nano Banana Pro",
-              studioSource: "video-factory",
-              removeWatermark: cs.removeWatermark === true,
-              autoRemoveWatermark: cs.removeWatermark === true,
-              upsampleResolution: cs.imageResolution === '2k' ? '2K' : 'Full HD',
-              resolution: cs.imageResolution === '2k' ? '2K' : 'Standard',
-              quality: cs.imageResolution === '2k' ? '2K' : 'Standard',
-              imageResolution: cs.imageResolution,
-              upscale2k: cs.imageResolution === '2k',
-              accountSelection: isManual ? "manual" : "auto"
-            }
-          };
       });
 
       const now = Date.now();
@@ -1782,13 +2079,20 @@ function FashionKocProStudio({
         return f;
       }));
 
-      toast?.success?.("👗 Cảnh 3 đã có mỏ neo mặc váy! Đang tự động nạp Cảnh 04, 05, 06, 07...");
+      toast?.success?.("👗 Cảnh 3 đã có mỏ neo! Đang tự động nạp Cảnh 04, 05, 06, 07...");
     } catch (err) {
       console.error("Lỗi dispatch scenes anchor 3:", err);
     }
   };
+  React.useEffect(() => {
+    dispatchRef.current = {
+      dispatchScenesWaitingAnchor1,
+      dispatchScenesWaitingAnchor2,
+      dispatchScenesWaitingAnchor3
+    };
+  });
 
-  // 🧠 2. Phân Tích Chuyển Động Siêu Tốc (HỖ TRỢ GEMINI VISION API TRỰC TIẾP & BROWSER HUB)
+  // 🧠 2. Phân Tích Chuyển Động Siêu Tốc (HỖ TRỢ GEMINI VISION API TRỰC TIẾP & BROWSER HUB & SMART DIRECTOR FALLBACK)
   const analyzeMotion = async () => {
     const cs = stateRef.current;
     
@@ -1800,7 +2104,20 @@ function FashionKocProStudio({
 
     let activeKey = (localApiKey || geminiApiKey || localStorage.getItem('aivideo_gemini_api_key') || '').trim();
 
-    // Nếu chưa có Gemini API Key hợp lệ thì mở modal cho người dùng nhập ngay
+    // Nếu chưa có activeKey, thử lấy từ main settings qua IPC
+    if (!activeKey || !(activeKey.startsWith('AIzaSy') || activeKey.startsWith('AQ.'))) {
+      try {
+        const sApi = window.aiforge?.settings || window.aivideo?.settings;
+        const mainKey = await sApi?.getGeminiApiKey?.();
+        if (mainKey && (mainKey.startsWith('AIzaSy') || mainKey.startsWith('AQ.'))) {
+          activeKey = mainKey.trim();
+          setLocalApiKey(activeKey);
+          try { localStorage.setItem('aivideo_gemini_api_key', activeKey); } catch (_) {}
+        }
+      } catch (_) {}
+    }
+
+    // Nếu vẫn chưa có Gemini API Key hợp lệ thì mở modal cho người dùng nhập ngay
     if (!activeKey || !(activeKey.startsWith('AIzaSy') || activeKey.startsWith('AQ.'))) {
       setTempApiKeyInput(activeKey);
       setShowApiKeyModal(true);
@@ -1817,17 +2134,20 @@ function FashionKocProStudio({
     })));
 
     let successCount = 0;
+    let fallbackCount = 0;
     let failCount = 0;
-    let firstFailError = "";
 
-    const promises = cs.storyboard.map(async (frame) => {
+    // Chạy tuần tự từng cảnh để triệt tiêu 100% lỗi 429 Rate Limit từ Google Gemini API
+    for (const frame of cs.storyboard) {
       if (!frame.imageAsset) {
         updateFrame(frame.id, { videoPromptStatus: "error" });
         failCount++;
-        return;
+        continue;
       }
 
-            let action = "";
+      updateFrame(frame.id, { videoPromptStatus: "generating" });
+
+      let action = "";
       switch (Number(frame.id)) {
         case 1: action = "Excitedly tearing open the black courier bag, plastic rustling sounds, looking at camera with a big closed-mouth smile."; break;
         case 2: action = "Detailed fabric showcase, moving material near lens, showing texture, happy facial expression with mouth closed."; break;
@@ -1839,40 +2159,59 @@ function FashionKocProStudio({
         default: action = "Natural fashion posing movement with mouth strictly closed.";
       }
 
-      // Ưu tiên gọi trực tiếp qua Gemini Vision API (Cảnh 1 kèm ảnh Outfit tham chiếu)
-      let res = await callGeminiVisionDirector(frame, action, activeKey, Number(frame.id) === 1 ? cs.outfit : null);
+      let validPrompt = "";
+      let isFallback = false;
 
-      // Nếu Gemini API ngoài gặp lỗi, tự động fallback sang Browser Hub
-      if (!res.ok) {
+      // 1. Thử gọi Gemini Vision API
+      try {
+        const geminiRes = await callGeminiVisionDirector(frame, action, activeKey, Number(frame.id) === 1 ? cs.outfit : null);
+        if (geminiRes?.ok && isValidMotionPrompt(geminiRes?.prompt)) {
+          validPrompt = geminiRes.prompt.trim();
+        }
+      } catch (err) {
+        console.warn(`[Motion Director] Gemini Vision Cảnh ${frame.id} gặp sự cố:`, err);
+      }
+
+      // 2. Nếu Gemini chưa trả về prompt chuẩn, thử qua Browser Flow (có timeout 5s)
+      if (!validPrompt) {
         try {
           const flowRes = await callGoogleFlowDirector(frame, action, []);
-          if (flowRes && flowRes.ok) res = flowRes;
+          if (flowRes?.ok && isValidMotionPrompt(flowRes?.prompt)) {
+            validPrompt = flowRes.prompt.trim();
+          }
         } catch (_) {}
       }
 
-      if (res.ok && res.prompt) {
-        updateFrame(frame.id, {
-          videoPrompt: res.prompt,
-          videoPromptStatus: "done"
-        });
-        successCount++;
-      } else {
-        console.error(`[Motion Director] Cảnh ${frame.id} thất bại:`, res.error);
-        if (!firstFailError) firstFailError = res.error || "";
-        updateFrame(frame.id, {
-          videoPromptStatus: "error"
-        });
-        failCount++;
+      // 3. Nếu cả 2 đều lỗi (hoặc dính RPC Error/Rate Limit): Kích hoạt ngay Smart Motion Director
+      if (!validPrompt || !isValidMotionPrompt(validPrompt)) {
+        validPrompt = getSmartMotionPrompt(frame.id, cs.creativeDirection, cs.outfit?.name || cs.outfit?.productName || cs.outfitName);
+        isFallback = true;
       }
-    });
 
-    await Promise.all(promises);
+      // Luôn cập nhật trạng thái "done" và gán prompt chuẩn - KHÔNG BAO GIỜ TREO ĐỒNG HỒ CÁT!
+      updateFrame(frame.id, {
+        videoPrompt: validPrompt,
+        videoPromptStatus: "done"
+      });
+
+      if (isFallback) fallbackCount++;
+      else successCount++;
+
+      // Nghỉ ngắn 100ms giữa các cảnh để UI mượt mà và tránh burst API
+      await new Promise(r => setTimeout(r, 100));
+    }
+
     setIsGeneratingPrompts(false);
 
-    if (successCount === cs.storyboard.length) {
-      toast?.success?.("Đã hoàn tất phân tích kịch bản chuyển động từ Gemini Vision AI cho cả 7 cảnh!");
-    } else if (successCount > 0) {
-      toast?.warn?.(`Phân tích thành công ${successCount}/${cs.storyboard.length} cảnh (${failCount} cảnh lỗi: ${firstFailError}).`);
+    const totalSuccess = successCount + fallbackCount;
+    if (totalSuccess === cs.storyboard.length) {
+      if (fallbackCount > 0) {
+        toast?.success?.(`Đã hoàn tất phân tích kịch bản chuyển động 8s cho cả 7 cảnh (${successCount} từ Gemini Vision, ${fallbackCount} từ Smart Director tích hợp)!`);
+      } else {
+        toast?.success?.("Đã hoàn tất phân tích kịch bản chuyển động từ Gemini Vision AI cho cả 7 cảnh!");
+      }
+    } else if (totalSuccess > 0) {
+      toast?.warn?.(`Phân tích thành công ${totalSuccess}/${cs.storyboard.length} cảnh (${failCount} cảnh lỗi: ${firstFailError}).`);
     } else {
       toast?.error?.(firstFailError ? `Phân tích kịch bản thất bại: ${firstFailError}` : "Phân tích kịch bản thất bại. Vui lòng kiểm tra lại Gemini API Key!");
     }
@@ -1927,7 +2266,7 @@ function FashionKocProStudio({
       const targetAccId = curAcc?.accountId || undefined;
       const targetAccName = curAcc?.accountDisplayName || curAcc?.accountEmail || curAcc?.accountName || undefined;
 
-      // 🎯 QUY TẮC CỐT LÕI: NẠP ĐỦ 3 ẢNH THAM CHIẾU CHO MỌI CẢNH (ẢNH CẢNH + ẢNH KOC MẪU + ẢNH OUTFIT)
+      // 🎯 QUY TẮC NẠP ẢNH THAM CHIẾU VIDEO (TỪ VIDEO CẢNH 3 CHỈ NẠP ĐÚNG 1 ẢNH THAM CHIẾU CỦA CẢNH ĐÓ):
       let validAssetId = null;
       if (frame.imageAsset) {
         validAssetId = await ensureRegisteredAsset(frame.imageAsset, `koc_scene_${frameId}.jpg`);
@@ -1937,7 +2276,15 @@ function FashionKocProStudio({
       }
       const validKocId = cs.koc ? await ensureRegisteredAsset(cs.koc, 'koc_model_face.jpg') : null;
       const validOutfitId = cs.outfit ? await ensureRegisteredAsset(cs.outfit, 'outfit_sample.jpg') : null;
-      const sceneRefIds = [validAssetId, validKocId, validOutfitId].filter(Boolean);
+
+      const isFromScene3 = Number(frameId) >= 3;
+      // Từ video cảnh 3 trở đi: chỉ nạp đúng prompt do AI phân tích và ĐÚNG 1 ẢNH THAM CHIẾU CẢNH ĐÓ, không nạp thêm KOC hay Outfit
+      const sceneRefIds = isFromScene3 
+        ? [validAssetId].filter(Boolean) 
+        : [validAssetId, validKocId, validOutfitId].filter(Boolean);
+      const extraRefMediaIds = isFromScene3 
+        ? [] 
+        : [validKocId, validOutfitId].filter(Boolean);
 
       const modelDisplayName = FASHION_VIDEO_MODELS_MAP[cs.globalVideoModel] || 'Veo 3.1 - Lite [Lower Priority]';
 
@@ -1980,7 +2327,7 @@ function FashionKocProStudio({
           inputImageAssetId: validAssetId || undefined,
           firstFrameImageMediaId: validAssetId || undefined,
           startImageMediaId: validAssetId || undefined,
-          referenceImageMediaIds: [validKocId, validOutfitId].filter(Boolean),
+          referenceImageMediaIds: extraRefMediaIds,
           model: modelDisplayName,
           modelId: modelDisplayName,
           modelDisplayName: cs.globalVideoModel,
@@ -2090,7 +2437,7 @@ function FashionKocProStudio({
         const targetAccId = curAcc?.accountId || undefined;
         const targetAccName = curAcc?.accountDisplayName || curAcc?.accountEmail || curAcc?.accountName || undefined;
         
-        // 🎯 QUY TẮC CỐT LÕI: NẠP ĐỦ 3 ẢNH THAM CHIẾU CHO MỌI CẢNH (ẢNH CẢNH + ẢNH KOC MẪU + ẢNH OUTFIT)
+        // 🎯 QUY TẮC NẠP ẢNH THAM CHIẾU VIDEO (TỪ VIDEO CẢNH 3 CHỈ NẠP ĐÚNG 1 ẢNH THAM CHIẾU CỦA CẢNH ĐÓ):
         let validAssetId = null;
         if (frame.imageAsset) {
           validAssetId = await ensureRegisteredAsset(frame.imageAsset, `koc_scene_${frame.id}.jpg`);
@@ -2100,7 +2447,15 @@ function FashionKocProStudio({
         }
         const validKocId = cs.koc ? await ensureRegisteredAsset(cs.koc, 'koc_model_face.jpg') : null;
         const validOutfitId = cs.outfit ? await ensureRegisteredAsset(cs.outfit, 'outfit_sample.jpg') : null;
-        const sceneRefIds = [validAssetId, validKocId, validOutfitId].filter(Boolean);
+
+        const isFromScene3 = Number(frame.id) >= 3;
+        // Từ video cảnh 3 trở đi: chỉ nạp đúng prompt do AI phân tích và ĐÚNG 1 ẢNH THAM CHIẾU CẢNH ĐÓ, không nạp thêm KOC hay Outfit
+        const sceneRefIds = isFromScene3 
+          ? [validAssetId].filter(Boolean) 
+          : [validAssetId, validKocId, validOutfitId].filter(Boolean);
+        const extraRefMediaIds = isFromScene3 
+          ? [] 
+          : [validKocId, validOutfitId].filter(Boolean);
 
         const promptToSend = frame.videoPrompt || getSmartMotionPrompt(frame.id, cs.creativeDirection, cs.outfit?.name || cs.outfit?.productName || cs.outfitName);
 
@@ -2145,7 +2500,7 @@ function FashionKocProStudio({
             inputImageAssetId: validAssetId || undefined,
             firstFrameImageMediaId: validAssetId || undefined,
             startImageMediaId: validAssetId || undefined,
-            referenceImageMediaIds: [validKocId, validOutfitId].filter(Boolean),
+            referenceImageMediaIds: extraRefMediaIds,
             model: modelDisplayName,
             modelId: modelDisplayName,
             modelDisplayName: cs.globalVideoModel,
@@ -2343,24 +2698,41 @@ function FashionKocProStudio({
           )
         ),
 
-        // Banana Account Selector (Ảnh Storyboard)
-        React.createElement("div", { 
-          title: "Tài khoản tạo Ảnh Storyboard (Banana Pro / Google Flow)",
-          className: "flex items-center gap-1.5 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/30 shadow-sm" 
+        // Image Engine & Account Selector (Banana Pro vs Muse AI - Xưởng Thời Trang)
+        React.createElement("div", {
+          className: "flex items-center rounded-xl bg-black/40 border border-white/10 p-0.5 shadow-sm"
         },
-          React.createElement("span", { className: "text-xs" }, "🍌"),
-          accounts.filter(a => a.providerId === 'banana').length > 0 ? React.createElement("select", {
-            value: selectedBananaAccountId,
-            onChange: (e) => handleSelectBananaAccount(e.target.value),
-            className: "bg-transparent text-[11px] font-bold text-amber-300 outline-none cursor-pointer max-w-[140px] truncate"
-          },
-            React.createElement("option", { key: "auto", value: "auto", className: "bg-[#0b101f] text-amber-300 font-bold" }, "🔄 Tự động chia đều Acc"),
-            accounts.filter(a => a.providerId === 'banana').map(acc => 
-              React.createElement("option", { key: acc.accountId, value: acc.accountId, className: "bg-[#0b101f] text-amber-200" },
-                acc.accountEmail || acc.accountDisplayName || acc.accountId
+          React.createElement("button", {
+            type: "button",
+            onClick: () => { setImageEngine("banana"); try { localStorage.setItem("aiforge_koc_image_engine", "banana"); } catch(e){} },
+            className: `px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${imageEngine === "banana" ? "bg-amber-500 text-black shadow-md font-black" : "text-gray-400 hover:text-white"}`
+          }, React.createElement("span", null, "🍌"), React.createElement("span", null, "Banana")),
+          React.createElement("button", {
+            type: "button",
+            onClick: () => { setImageEngine("muse"); try { localStorage.setItem("aiforge_koc_image_engine", "muse"); } catch(e){} },
+            className: `px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${imageEngine === "muse" ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md font-black" : "text-gray-400 hover:text-white"}`
+          }, React.createElement("span", null, "⚡"), React.createElement("span", null, "Muse AI"))
+        ),
+        React.createElement("div", { 
+          title: imageEngine === "muse" ? "Tài khoản tạo Ảnh Storyboard (Muse AI)" : "Tài khoản tạo Ảnh Storyboard (Banana Pro / Google Flow)",
+          className: `flex items-center gap-1.5 px-2.5 py-1 rounded-xl border shadow-sm ${imageEngine === "muse" ? "bg-purple-500/10 border-purple-500/30 text-purple-300" : "bg-amber-500/10 border-amber-500/30 text-amber-300"}` 
+        },
+          React.createElement("span", { className: "text-xs" }, imageEngine === "muse" ? "⚡" : "🍌"),
+          (() => {
+            const availAccs = accounts.filter(a => imageEngine === "muse" ? (a.providerId === "muse" || (a.provider && a.provider.toLowerCase().includes("muse"))) : (a.providerId === "banana"));
+            return availAccs.length > 0 ? React.createElement("select", {
+              value: selectedBananaAccountId,
+              onChange: (e) => handleSelectBananaAccount(e.target.value),
+              className: `bg-transparent text-[11px] font-bold outline-none cursor-pointer max-w-[140px] truncate ${imageEngine === "muse" ? "text-purple-200" : "text-amber-300"}`
+            },
+              React.createElement("option", { key: "auto", value: "auto", className: "bg-[#0b101f] text-yellow-300 font-bold" }, imageEngine === "muse" ? "🔄 Tự chia đều Muse" : "🔄 Tự động chia đều Acc"),
+              availAccs.map(acc => 
+                React.createElement("option", { key: acc.accountId, value: acc.accountId, className: "bg-[#0b101f] text-white" },
+                  (imageEngine === "muse" ? "⚡ " : "🍌 ") + (acc.accountDisplayName || acc.accountEmail || acc.accountId)
+                )
               )
-            )
-          ) : React.createElement("span", { className: "text-[11px] text-amber-400 font-bold" }, "Chưa có Banana")
+            ) : React.createElement("span", { className: "text-[11px] font-bold opacity-80" }, imageEngine === "muse" ? "Chưa có Muse AI" : "Chưa có Banana");
+          })()
         ),
 
         // Video Engine Account Selector (Muse AI hoặc Veo 3)
@@ -2473,6 +2845,32 @@ function FashionKocProStudio({
             })
           ),
 
+          // Image Engine Config (Banana Pro vs Muse AI - Xưởng Thời Trang)
+          React.createElement("div", { className: "flex flex-col gap-2 p-2.5 rounded-xl bg-white/[0.03] border border-white/[0.08]" },
+            React.createElement("div", { className: "flex items-center justify-between px-0.5" },
+              React.createElement("span", { className: "text-[10px] font-black text-gray-400 tracking-[0.2em] uppercase" }, "Nền tảng tạo ảnh (Cảnh)"),
+              React.createElement("span", { className: "text-[9px] text-amber-300 font-bold" }, imageEngine === "muse" ? "⚡ Muse AI" : "🍌 Nano Banana")
+            ),
+            React.createElement("div", { className: "grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-black/40 border border-white/[0.08]" },
+              React.createElement("button", {
+                type: "button",
+                onClick: () => { setImageEngine('banana'); try { localStorage.setItem("aiforge_koc_image_engine", "banana"); } catch(e){} },
+                className: `py-1.5 px-2 rounded-lg text-[11px] font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${imageEngine === 'banana' ? 'bg-amber-500 text-black shadow-md' : 'text-gray-400 hover:text-white'}`
+              },
+                React.createElement("span", null, "🍌"),
+                React.createElement("span", null, "Banana Pro")
+              ),
+              React.createElement("button", {
+                type: "button",
+                onClick: () => { setImageEngine('muse'); try { localStorage.setItem("aiforge_koc_image_engine", "muse"); } catch(e){} },
+                className: `py-1.5 px-2 rounded-lg text-[11px] font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${imageEngine === 'muse' ? 'bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md' : 'text-gray-400 hover:text-white'}`
+              },
+                React.createElement("span", null, "⚡"),
+                React.createElement("span", null, "Muse AI")
+              )
+            )
+          ),
+
           // Engine Config (Muse AI vs Veo 3)
           React.createElement("div", { className: "flex flex-col gap-3" },
             React.createElement("div", { className: "flex items-center justify-between px-1" },
@@ -2579,12 +2977,12 @@ function FashionKocProStudio({
             // Button 1: Tạo 7 Cảnh Ảnh
             React.createElement(KocPillButton, {
               variant: "outline",
-              icon: React.createElement("span", null, "✨"),
+              icon: React.createElement("span", null, imageEngine === "muse" ? "⚡" : "✨"),
               onClick: generateAllImages,
               loading: isGeneratingImages,
               progress: overallImageProgress,
               disabled: !koc || !outfit
-            }, "Tạo 7 Cảnh Ảnh"),
+            }, imageEngine === "muse" ? "Tạo 7 Cảnh Ảnh (⚡ Muse AI)" : "Tạo 7 Cảnh Ảnh (🍌 Banana)"),
 
             // Button 2: Phân tích chuyển động + Nút Cài đặt Key
             React.createElement("div", { className: "flex items-center gap-1.5 w-full" },
@@ -2668,10 +3066,15 @@ function FashionKocProStudio({
                       React.createElement("span", { className: "text-[11px] font-bold text-amber-300 uppercase tracking-wider" }, "Chờ mỏ neo Cảnh 1"),
                       React.createElement("span", { className: "text-[9px] text-gray-400" }, "Tự động tạo khi Cảnh 1 xong")
                     )
+                  : f.imageStatus === "waiting_anchor_2" ? React.createElement("div", { className: "flex flex-col items-center justify-center gap-2 select-none text-center px-2" },
+                      React.createElement("span", { className: "text-4xl text-cyan-400 animate-pulse" }, "🎬"),
+                      React.createElement("span", { className: "text-[11px] font-bold text-cyan-300 uppercase tracking-wider" }, "Chờ mỏ neo Cảnh 2"),
+                      React.createElement("span", { className: "text-[9px] text-gray-400" }, "Tự động tạo khi Cảnh 2 xong")
+                    )
                   : f.imageStatus === "waiting_anchor_3" ? React.createElement("div", { className: "flex flex-col items-center justify-center gap-2 select-none text-center px-2" },
                       React.createElement("span", { className: "text-4xl text-rose-400 animate-pulse" }, "👗"),
                       React.createElement("span", { className: "text-[11px] font-bold text-rose-300 uppercase tracking-wider" }, "Chờ mỏ neo Cảnh 3"),
-                      React.createElement("span", { className: "text-[9px] text-gray-400" }, "Tự động tạo khi KOC mặc váy")
+                      React.createElement("span", { className: "text-[9px] text-gray-400" }, "Tự động tạo khi Cảnh 3 xong")
                     )
                   : React.createElement("div", { className: "flex flex-col items-center justify-center gap-2 select-none" },
                       React.createElement("span", { className: "text-4xl text-rose-500/70 group-hover:scale-110 transition-transform" }, "📸"),
@@ -2843,6 +3246,8 @@ function FashionKocProStudio({
                 }
                 setLocalApiKey(k);
                 try { localStorage.setItem('aivideo_gemini_api_key', k); } catch(_) {}
+                try { window.aiforge?.settings?.setGeminiApiKey?.(k); } catch(_) {}
+                try { window.aivideo?.settings?.setGeminiApiKey?.(k); } catch(_) {}
                 setShowApiKeyModal(false);
                 toast?.success?.("Đã lưu Gemini API Key thành công!");
                 setTimeout(() => analyzeMotion(), 200);
@@ -2887,6 +3292,13 @@ export default function VideoFactoryStudio() {
   const [kocImage, setKocImage] = React.useState(globalStudioState?.kocImage || null);
   const [kocProfile, setKocProfile] = React.useState(globalStudioState?.kocProfile || null);
   const [videoEngine, setVideoEngine] = React.useState(globalStudioState?.videoEngine || 'muse');
+  const [imageEngine, setImageEngine] = React.useState(() => {
+    try {
+      const ie = localStorage.getItem("aivideo_factory_image_engine");
+      if (ie === "muse" || ie === "banana") return ie;
+    } catch(_) {}
+    return globalStudioState?.imageEngine || "muse";
+  });
   const [videoModel, setVideoModel] = React.useState(globalStudioState?.videoModel || 'Veo 3.1 - Lite [Lower Priority]');
   const [selectedVoice, setSelectedVoice] = React.useState(globalStudioState?.selectedVoice || '🎙️ Nữ Miền Bắc – Trẻ trung & Bắt tai');
   const [removeWatermark, setRemoveWatermark] = React.useState(globalStudioState?.removeWatermark === true);
@@ -2952,6 +3364,7 @@ export default function VideoFactoryStudio() {
       kocImage,
       kocProfile,
       videoEngine,
+      imageEngine,
       videoModel,
       selectedVoice,
       removeWatermark,
@@ -2963,7 +3376,7 @@ export default function VideoFactoryStudio() {
     try {
       localStorage.setItem('aivideo_factory_persisted_state', JSON.stringify(toSave));
     } catch(e) {}
-  }, [currentNiche, products, productInfo, brandName, bgMode, kocImage, kocProfile, videoEngine, videoModel, selectedVoice, removeWatermark, videoResolution, sceneCount, scenes]);
+  }, [currentNiche, products, productInfo, brandName, bgMode, kocImage, kocProfile, videoEngine, imageEngine, videoModel, selectedVoice, removeWatermark, videoResolution, sceneCount, scenes]);
 
   const handleSaveGeminiKey = (key) => {
     setGeminiApiKey(key);
@@ -3516,14 +3929,14 @@ Return ONLY a JSON array of ${sceneCount} prompt strings:
           return {
             title: `[Xưởng] Showroom Cảnh ${s.id}: ${s.stage} - ${brandName}`,
             type: "Image",
-            providerId: "banana",
-            provider: "Banana",
+            providerId: imageEngine === "muse" ? "muse" : "banana",
+            provider: imageEngine === "muse" ? "Muse AI" : "Banana",
             ...(targetBananaAccId ? { accountId: targetBananaAccId } : {}),
             payload: {
               title: `[Xưởng] Showroom Cảnh ${s.id}: ${s.stage}`,
-              prompt: promptForScene,
+              prompt: imageEngine === "muse" && !promptForScene.toLowerCase().startsWith('tạo ảnh') ? `Tạo ảnh 9:16: ${promptForScene}` : promptForScene,
               ratio: "9:16",
-              model: "banana",
+              model: imageEngine === "muse" ? "muse-image" : "banana",
               modelDisplayName: "🍌 Nano Banana Pro",
               referenceAssetIds: refIds,
               studioSource: "video-factory",
@@ -4029,7 +4442,7 @@ ${scenes.map((_, i) => `  { "voiceScript": "...", "motionPrompt": "..." }`).join
               script: scene.voiceScript,
               voiceName: matchedVoice.name,
               voiceId: matchedVoice.id,
-              modelId: "eleven_multilingual_v2"
+              modelId: "eleven_v4"
             }
           } : {
             title: `[Xưởng] Cảnh ${scene.id}: ${scene.stage}`,
@@ -4060,7 +4473,7 @@ ${scenes.map((_, i) => `  { "voiceScript": "...", "motionPrompt": "..." }`).join
               script: scene.voiceScript,
               voiceName: matchedVoice.name,
               voiceId: matchedVoice.id,
-              modelId: "eleven_multilingual_v2"
+              modelId: "eleven_v4"
             }
           }
         };
@@ -4180,7 +4593,7 @@ ${scenes.map((_, i) => `  { "voiceScript": "...", "motionPrompt": "..." }`).join
                 script: scene.voiceScript || '',
                 voiceName: matchedVoice.name,
                 voiceId: matchedVoice.id,
-                modelId: "eleven_multilingual_v2"
+                modelId: "eleven_v4"
               }
             } : {
               title: `[Xưởng] Cảnh ${scene.id}: ${scene.stage}`,
@@ -4211,7 +4624,7 @@ ${scenes.map((_, i) => `  { "voiceScript": "...", "motionPrompt": "..." }`).join
                 script: scene.voiceScript || '',
                 voiceName: matchedVoice.name,
                 voiceId: matchedVoice.id,
-                modelId: "eleven_multilingual_v2"
+                modelId: "eleven_v4"
               }
             }
           };
@@ -4417,24 +4830,41 @@ Motion Prompt: ${s.motionPrompt}
           )
         ),
 
-        // Banana Account Selector (Ảnh Showroom)
-        React.createElement("div", { 
-          title: "Tài khoản tạo Ảnh Showroom (Banana Pro / Google Flow)",
-          className: "flex items-center gap-1.5 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/30 shadow-sm" 
+        // Image Engine & Account Selector (Banana Pro vs Muse AI - Showroom)
+        React.createElement("div", {
+          className: "flex items-center rounded-xl bg-black/40 border border-white/10 p-0.5 shadow-sm"
         },
-          React.createElement("span", { className: "text-xs" }, "🍌"),
-          accounts.filter(a => a.providerId === 'banana').length > 0 ? React.createElement("select", {
-            value: selectedBananaAccountId,
-            onChange: (e) => handleSelectBananaAccount(e.target.value),
-            className: "bg-transparent text-[11px] font-bold text-amber-300 outline-none cursor-pointer max-w-[140px] truncate"
-          },
-            React.createElement("option", { key: "auto", value: "auto", className: "bg-[#0b101f] text-amber-300 font-bold" }, "🔄 Tự động chia đều Acc"),
-            accounts.filter(a => a.providerId === 'banana').map(acc => 
-              React.createElement("option", { key: acc.accountId, value: acc.accountId, className: "bg-[#0b101f] text-amber-200" },
-                `🍌 ${acc.accountEmail || acc.accountDisplayName || acc.accountId}`
+          React.createElement("button", {
+            type: "button",
+            onClick: () => { setImageEngine("banana"); try { localStorage.setItem("aivideo_factory_image_engine", "banana"); } catch(e){} },
+            className: `px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${imageEngine === "banana" ? "bg-amber-500 text-black shadow-md font-black" : "text-gray-400 hover:text-white"}`
+          }, React.createElement("span", null, "🍌"), React.createElement("span", null, "Banana")),
+          React.createElement("button", {
+            type: "button",
+            onClick: () => { setImageEngine("muse"); try { localStorage.setItem("aivideo_factory_image_engine", "muse"); } catch(e){} },
+            className: `px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-all ${imageEngine === "muse" ? "bg-gradient-to-r from-purple-600 to-pink-600 text-white shadow-md font-black" : "text-gray-400 hover:text-white"}`
+          }, React.createElement("span", null, "⚡"), React.createElement("span", null, "Muse AI"))
+        ),
+        React.createElement("div", { 
+          title: imageEngine === "muse" ? "Tài khoản tạo Ảnh Showroom (Muse AI)" : "Tài khoản tạo Ảnh Showroom (Banana Pro / Google Flow)",
+          className: `flex items-center gap-1.5 px-2.5 py-1 rounded-xl border shadow-sm ${imageEngine === "muse" ? "bg-purple-500/10 border-purple-500/30 text-purple-300" : "bg-amber-500/10 border-amber-500/30 text-amber-300"}` 
+        },
+          React.createElement("span", { className: "text-xs" }, imageEngine === "muse" ? "⚡" : "🍌"),
+          (() => {
+            const availAccs = accounts.filter(a => imageEngine === "muse" ? (a.providerId === "muse" || (a.provider && a.provider.toLowerCase().includes("muse"))) : (a.providerId === "banana"));
+            return availAccs.length > 0 ? React.createElement("select", {
+              value: selectedBananaAccountId,
+              onChange: (e) => handleSelectBananaAccount(e.target.value),
+              className: `bg-transparent text-[11px] font-bold outline-none cursor-pointer max-w-[140px] truncate ${imageEngine === "muse" ? "text-purple-200" : "text-amber-300"}`
+            },
+              React.createElement("option", { key: "auto", value: "auto", className: "bg-[#0b101f] text-yellow-300 font-bold" }, imageEngine === "muse" ? "🔄 Tự chia đều Muse" : "🔄 Tự động chia đều Acc"),
+              availAccs.map(acc => 
+                React.createElement("option", { key: acc.accountId, value: acc.accountId, className: "bg-[#0b101f] text-white" },
+                  (imageEngine === "muse" ? "⚡ " : "🍌 ") + (acc.accountDisplayName || acc.accountEmail || acc.accountId)
+                )
               )
-            )
-          ) : React.createElement("span", { className: "text-[11px] text-amber-400 font-semibold" }, "Chưa có Banana")
+            ) : React.createElement("span", { className: "text-[11px] font-bold opacity-80" }, imageEngine === "muse" ? "Chưa có Muse AI" : "Chưa có Banana");
+          })()
         ),
 
         // Video Account Selector (Muse AI hoặc Veo 3)
@@ -4619,6 +5049,25 @@ Motion Prompt: ${s.motionPrompt}
               onChange: (v) => setBrandName(v),
               placeholder: "Ví dụ: GIA DỤNG VIỆT"
             }),
+
+            // NỀN TẢNG TẠO ẢNH SHOWROOM (ENGINE)
+            React.createElement("div", { className: "space-y-1" },
+              React.createElement("div", { className: "flex items-center justify-between" },
+                React.createElement("p", { className: "text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-0.5" }, "NỀN TẢNG TẠO ẢNH SHOWROOM"),
+                React.createElement("span", { className: "text-[9px] text-amber-300 font-bold" }, imageEngine === "muse" ? "⚡ Muse AI" : "🍌 Banana Pro")
+              ),
+              React.createElement(SegmentedToggle, {
+                value: imageEngine,
+                onChange: (v) => {
+                  setImageEngine(v);
+                  try { localStorage.setItem('aivideo_factory_image_engine', v); } catch(e){}
+                },
+                items: [
+                  { value: 'banana', label: '🍌 Banana Pro', icon: React.createElement("span", { className: "text-xs font-bold text-amber-400" }, "🍌") },
+                  { value: 'muse', label: '⚡ Muse AI (Ưu tiên)', icon: React.createElement("span", { className: "text-xs font-bold text-purple-400" }, "⚡") }
+                ]
+              })
+            ),
 
             // NỀN TẢNG TẠO VIDEO (ENGINE)
             React.createElement("div", { className: "space-y-1" },

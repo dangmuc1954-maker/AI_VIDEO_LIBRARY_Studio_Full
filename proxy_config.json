@@ -1,0 +1,6 @@
+{
+  "//_comment": "Nhập địa chỉ proxy tĩnh vào trường 'proxy' dưới đây (hỗ trợ http, https, socks5). Để trống nếu không dùng.",
+  "proxy": "",
+  "username": "",
+  "password": ""
+}
