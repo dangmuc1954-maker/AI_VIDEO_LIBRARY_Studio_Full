@@ -40,9 +40,13 @@ temp_cookies.db
 *.asar
 *.7z
 *.onnx
+!app/models/**/*.onnx
+scripts/cache_electron_mac/
+parent_app_extracted/
 
 # Agent & Skill Customizations
-.agents/
+.agents/skills/
+# .agents/rules/ is kept for project rules
 
 # Audio & Video test media
 *.mp3
