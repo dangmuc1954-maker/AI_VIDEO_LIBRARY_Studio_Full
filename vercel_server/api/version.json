@@ -1,9 +1,9 @@
 {
-  "version": "3.1.1",
-  "name": "AI VIDEO LIBRARY v3.1.1",
+  "version": "3.1.2",
+  "name": "AI VIDEO LIBRARY v3.1.2",
   "releaseDate": "2026-11-04",
-  "changelog": "Vá lỗi Muse AI và tối ưu tự động khởi động lại âm thầm không mở CMD",
-  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.1.1/update-patch.zip",
+  "changelog": "Nâng cấp bộ quét video Muse AI đa tầng, tự động lấy video siêu tốc và tối ưu hàng đợi",
+  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.1.2/update-patch.zip",
   "mandatory": false,
   "minVersion": "3.0.0"
 }

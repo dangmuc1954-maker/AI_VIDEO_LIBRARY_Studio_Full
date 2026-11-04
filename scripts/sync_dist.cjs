@@ -30,8 +30,12 @@ for (const target of targets) {
   
   // 1. Clean & Copy out
   const targetOut = path.join(target, 'out');
-  if (fs.existsSync(targetOut)) {
-    fs.rmSync(targetOut, { recursive: true, force: true });
+  try {
+    if (fs.existsSync(targetOut)) {
+      fs.rmSync(targetOut, { recursive: true, force: true });
+    }
+  } catch (e) {
+    console.log('  [*] Ghi đè trực tiếp vào out/ (tiến trình đang chạy)');
   }
   copyDir(path.join(__dirname, '../app/out'), targetOut);
   console.log('  ✓ Đã cập nhật out/ sạch sẽ 100%');

@@ -154,13 +154,14 @@ const VIDEO_MODELS = [
 ];
 
 function mapVideoModelToBackendId(modelDisplayName) {
-  if (!modelDisplayName) return 'veo-3.1-lite-low-priority';
-  if (modelDisplayName.includes('Lower Priority') || modelDisplayName.includes('low-priority')) return 'veo-3.1-lite-low-priority';
-  if (modelDisplayName.includes('Lite')) return 'veo-3.1-lite';
-  if (modelDisplayName.includes('Fast')) return 'veo-3.1-fast';
-  if (modelDisplayName.includes('Quality')) return 'veo-3.1-quality';
-  if (modelDisplayName.includes('Omni') || modelDisplayName.includes('Flash')) return 'omni-flash-1.1';
-  return 'veo-3.1-lite-low-priority';
+  if (!modelDisplayName) return 'veo-3.1-lite';
+  const s = String(modelDisplayName).toLowerCase();
+  if (s.includes('quality')) return 'veo-3.1-quality';
+  if (s.includes('fast')) return 'veo-3.1-fast';
+  if (s.includes('low') || s.includes('priority')) return 'veo-3.1-lite-low-priority';
+  if (s.includes('lite')) return 'veo-3.1-lite';
+  if (s.includes('omni') || s.includes('flash')) return 'omni-flash-1.1';
+  return 'veo-3.1-lite';
 }
 
 // PHÂN TÍCH NHẬN DIỆN CHI TIẾT KOC (GIỚI TÍNH, TRANG PHỤC, NỤ CƯỜI TƯƠI TẮN)
@@ -524,10 +525,10 @@ function initScenesForCount(count = 5, existingScenes = []) {
 // ============================================================================
 
 const FASHION_VIDEO_MODELS_MAP = {
-  'Veo 3.1 - Lite': 'Veo 3.1 - Lite [Lower Priority]',
-  'Veo 3.1 - Fast': 'Veo 3.1 - Fast',
-  'Veo 3.1 - Quality': 'Veo 3.1 - Quality',
-  'Omni 1.1 Flash': 'Omni 1.1 Flash'
+  'Veo 3.1 - Lite': 'veo-3.1-lite',
+  'Veo 3.1 - Fast': 'veo-3.1-fast',
+  'Veo 3.1 - Quality': 'veo-3.1-quality',
+  'Omni 1.1 Flash': 'omni-flash-1.1'
 };
 
 const FASHION_VIDEO_MODELS = Object.keys(FASHION_VIDEO_MODELS_MAP);
@@ -2286,7 +2287,7 @@ function FashionKocProStudio({
         ? [] 
         : [validKocId, validOutfitId].filter(Boolean);
 
-      const modelDisplayName = FASHION_VIDEO_MODELS_MAP[cs.globalVideoModel] || 'Veo 3.1 - Lite [Lower Priority]';
+      const modelDisplayName = FASHION_VIDEO_MODELS_MAP[cs.globalVideoModel] || 'veo-3.1-lite';
 
       const jobInput = {
         title: `[KOC Thời Trang] Video Cảnh ${frameId}`,
@@ -2416,7 +2417,7 @@ function FashionKocProStudio({
         manualAcc = accounts.find(a => a.accountId === selectedVideoAccountId);
       }
 
-      const modelDisplayName = FASHION_VIDEO_MODELS_MAP[cs.globalVideoModel] || 'Veo 3.1 - Lite [Lower Priority]';
+      const modelDisplayName = FASHION_VIDEO_MODELS_MAP[cs.globalVideoModel] || 'veo-3.1-lite';
       const runId = `fashion-run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const runCreatedAt = new Date().toISOString();
 
@@ -3291,15 +3292,21 @@ export default function VideoFactoryStudio() {
   const [bgMode, setBgMode] = React.useState(globalStudioState?.bgMode || 'auto');
   const [kocImage, setKocImage] = React.useState(globalStudioState?.kocImage || null);
   const [kocProfile, setKocProfile] = React.useState(globalStudioState?.kocProfile || null);
-  const [videoEngine, setVideoEngine] = React.useState(globalStudioState?.videoEngine || 'muse');
+  const [videoEngine, setVideoEngine] = React.useState(() => {
+    try {
+      const ve = localStorage.getItem("aivideo_factory_video_engine");
+      if (ve === "muse" || ve === "veo3") return ve;
+    } catch(_) {}
+    return globalStudioState?.videoEngine || 'veo3';
+  });
   const [imageEngine, setImageEngine] = React.useState(() => {
     try {
       const ie = localStorage.getItem("aivideo_factory_image_engine");
       if (ie === "muse" || ie === "banana") return ie;
     } catch(_) {}
-    return globalStudioState?.imageEngine || "muse";
+    return globalStudioState?.imageEngine || "banana";
   });
-  const [videoModel, setVideoModel] = React.useState(globalStudioState?.videoModel || 'Veo 3.1 - Lite [Lower Priority]');
+  const [videoModel, setVideoModel] = React.useState(globalStudioState?.videoModel || 'Veo 3.1 - Lite');
   const [selectedVoice, setSelectedVoice] = React.useState(globalStudioState?.selectedVoice || '🎙️ Nữ Miền Bắc – Trẻ trung & Bắt tai');
   const [removeWatermark, setRemoveWatermark] = React.useState(globalStudioState?.removeWatermark === true);
   const [videoResolution, setVideoResolution] = React.useState(globalStudioState?.videoResolution || '720p');
@@ -3696,9 +3703,10 @@ export default function VideoFactoryStudio() {
     reader.onload = async (event) => {
       const base64 = event.target.result;
       let assetId = null;
-      if (window.aiforge?.assets?.importReference) {
+      const api = window.aiforge?.assets || window.aivideo?.assets;
+      if (api?.importReference) {
         try {
-          const imported = await window.aiforge.assets.importReference({
+          const imported = await api.importReference({
             name: file.name,
             mimeType: file.type,
             dataUrl: base64
@@ -3728,9 +3736,10 @@ export default function VideoFactoryStudio() {
     reader.onload = async (event) => {
       const base64 = event.target.result;
       let assetId = null;
-      if (window.aiforge?.assets?.importReference) {
+      const api = window.aiforge?.assets || window.aivideo?.assets;
+      if (api?.importReference) {
         try {
-          const imported = await window.aiforge.assets.importReference({
+          const imported = await api.importReference({
             name: file.name,
             mimeType: file.type,
             dataUrl: base64
@@ -3879,20 +3888,30 @@ Return ONLY a JSON array of ${sceneCount} prompt strings:
         } catch(e) {}
       }
 
-      // Chuẩn bị reference assets
+      // Chuẩn bị reference assets với đăng ký đảm bảo
       const refIds = [];
-      products.forEach(p => { if (p?.assetId) refIds.push(p.assetId); });
-      if (kocImage?.assetId) {
-        refIds.push(kocImage.assetId);
+      for (let pIdx = 0; pIdx < products.length; pIdx++) {
+        const p = products[pIdx];
+        if (p) {
+          const aid = await ensureRegisteredAsset(p, `product_${pIdx + 1}.jpg`);
+          if (aid) refIds.push(aid);
+        }
+      }
+      if (kocImage) {
+        const kid = await ensureRegisteredAsset(kocImage, 'koc_ref.jpg');
+        if (kid) refIds.push(kid);
       }
 
       // 🎯 ROUND-ROBIN CHO ẢNH SHOWROOM: Chia đều cho từng tài khoản Banana
       const isAutoBanana = !selectedBananaAccountId || selectedBananaAccountId === 'auto';
-      let activeBananaAccs = accounts.filter(a => a.providerId === 'banana' && (a.authStatus === 'Logged In' || a.authStatus === 'active' || !a.disabled));
-      if (activeBananaAccs.length === 0) activeBananaAccs = accounts.filter(a => a.providerId === 'banana');
-      let manualBananaAcc = !isAutoBanana ? accounts.find(a => a.accountId === selectedBananaAccountId) : undefined;
+      const liveSessions = (window.aiforge?.browser?.listSessions?.() || window.aivideo?.browser?.listSessions?.() || []);
+      const allAccs = (accounts && accounts.length > 0) ? accounts : liveSessions;
+      let activeBananaAccs = allAccs.filter(a => a.providerId === 'banana' && (a.authStatus === 'Logged In' || a.authStatus === 'active' || !a.disabled));
+      if (activeBananaAccs.length === 0) activeBananaAccs = allAccs.filter(a => a.providerId === 'banana');
+      let manualBananaAcc = !isAutoBanana ? allAccs.find(a => a.accountId === selectedBananaAccountId) : undefined;
 
-      if (window.aiforge?.queue?.addJobs) {
+      const qApi = window.aiforge?.queue || window.aivideo?.queue;
+      if (qApi?.addJobs || qApi?.addJob) {
 
         const prodDesc = productInfo || niche.defaultInfo || brandName;
 
@@ -3937,7 +3956,7 @@ Return ONLY a JSON array of ${sceneCount} prompt strings:
               prompt: imageEngine === "muse" && !promptForScene.toLowerCase().startsWith('tạo ảnh') ? `Tạo ảnh 9:16: ${promptForScene}` : promptForScene,
               ratio: "9:16",
               model: imageEngine === "muse" ? "muse-image" : "banana",
-              modelDisplayName: "🍌 Nano Banana Pro",
+              modelDisplayName: imageEngine === "muse" ? "⚡ Muse AI" : "🍌 Nano Banana Pro",
               referenceAssetIds: refIds,
               studioSource: "video-factory",
               removeWatermark: removeWatermark,
@@ -3952,11 +3971,12 @@ Return ONLY a JSON array of ${sceneCount} prompt strings:
           };
         });
 
-        const res = await window.aiforge.queue.addJobs(jobs);
-        try { window.aiforge?.queue?.resume?.(); } catch(_) {}
-        if (res?.results && Array.isArray(res.results)) {
+        const res = await (qApi.addJobs ? qApi.addJobs(jobs) : Promise.all(jobs.map(j => qApi.addJob(j))));
+        try { qApi.resume?.(); } catch(_) {}
+        const jobResults = Array.isArray(res) ? res : (res?.results || []);
+        if (jobResults && Array.isArray(jobResults)) {
           setScenes(prev => prev.map((s, idx) => {
-            const jId = res.results[idx]?.job?.id;
+            const jId = jobResults[idx]?.job?.id || jobResults[idx]?.id || null;
             return {
               ...s,
               showroomJobId: jId || null,
@@ -3965,7 +3985,7 @@ Return ONLY a JSON array of ${sceneCount} prompt strings:
               showroomRunStartTime: runStartTime
             };
           }));
-          toast?.info?.(`Đã gửi lệnh tạo ${sceneCount} ảnh Showroom góc máy riêng biệt sang Banana Pro!`);
+          toast?.info?.(`Đã gửi lệnh tạo ${sceneCount} ảnh Showroom góc máy riêng biệt sang ${imageEngine === "muse" ? "Muse AI" : "Banana Pro"}!`);
           setIsShowroomGenerating(false);
           setTimeout(() => checkJobsAndAssetsDirectly(), 800);
           return;
@@ -4412,7 +4432,8 @@ ${scenes.map((_, i) => `  { "voiceScript": "...", "motionPrompt": "..." }`).join
         }
       }
 
-      if (window.aiforge?.queue?.addJobs) {
+      const qApi = window.aiforge?.queue || window.aivideo?.queue;
+      if (qApi?.addJobs || qApi?.addJob) {
         const jobInput = {
           title: `[Xưởng] Cảnh ${scene.id}: ${scene.stage} - ${brandName}`,
           type: "Video",
@@ -4478,15 +4499,17 @@ ${scenes.map((_, i) => `  { "voiceScript": "...", "motionPrompt": "..." }`).join
           }
         };
 
-        const res = await window.aiforge.queue.addJobs([jobInput]);
-        if (res?.results?.[0]?.ok && res.results[0].job?.id) {
-          const jId = res.results[0].job.id;
+        const res = await (qApi.addJobs ? qApi.addJobs([jobInput]) : qApi.addJob(jobInput));
+        try { qApi.resume?.(); } catch(_) {}
+        const rItem = Array.isArray(res) ? res[0] : (res?.results?.[0] || res);
+        const jId = rItem?.job?.id || rItem?.id || null;
+        if (jId && !rItem?.error) {
           setScenes(prev => prev.map((s, i) => i === index ? { ...s, jobId: jId, videoStatus: 'generating', videoProgress: 15 } : s));
           toast?.info?.(`Cảnh ${scene.id} đã gửi sang ${isMuse ? 'Muse AI' : `Google Flow (${videoModel})`} kèm ảnh Showroom Banana!`);
           setTimeout(() => checkJobsAndAssetsDirectly(), 800);
           return;
-        } else if (res?.results?.[0]?.error) {
-          throw new Error(res.results[0].error);
+        } else if (rItem?.error) {
+          throw new Error(rItem.error);
         }
       }
 
@@ -4535,7 +4558,8 @@ ${scenes.map((_, i) => `  { "voiceScript": "...", "motionPrompt": "..." }`).join
         (a.providerId === 'veo3' && (a.authStatus === 'Logged In' || a.authStatus === 'active'))
       );
 
-      if (window.aiforge?.queue?.addJobs) {
+      const qApi = window.aiforge?.queue || window.aivideo?.queue;
+      if (qApi?.addJobs || qApi?.addJob) {
         const runId = `vfs-run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const runCreatedAt = new Date().toISOString();
 
@@ -4630,16 +4654,19 @@ ${scenes.map((_, i) => `  { "voiceScript": "...", "motionPrompt": "..." }`).join
           };
         }));
 
-        const res = await window.aiforge.queue.addJobs(jobs);
-        if (res?.results && Array.isArray(res.results)) {
+        const res = await (qApi.addJobs ? qApi.addJobs(jobs) : Promise.all(jobs.map(j => qApi.addJob(j))));
+        try { qApi.resume?.(); } catch(_) {}
+        const jobResults = Array.isArray(res) ? res : (res?.results || []);
+        if (jobResults && Array.isArray(jobResults)) {
           let successCount = 0;
           let firstError = null;
 
           setScenes(prev => prev.map((s, idx) => {
-            const r = res.results[idx];
-            if (r?.ok && r.job?.id) {
+            const r = jobResults[idx];
+            const jId = r?.job?.id || r?.id || null;
+            if (jId && !r?.error) {
               successCount++;
-              return { ...s, jobId: r.job.id, videoStatus: 'generating', videoProgress: 15 };
+              return { ...s, jobId: jId, videoStatus: 'generating', videoProgress: 15 };
             } else {
               if (r?.error && !firstError) firstError = r.error;
               return s;
