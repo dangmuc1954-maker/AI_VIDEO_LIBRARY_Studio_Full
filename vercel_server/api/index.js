@@ -674,6 +674,44 @@ module.exports = async (req, res) => {
   }
 
   // =========================================================================
+  // VERSION & IN-APP AUTO-UPDATE ENDPOINT
+  // =========================================================================
+  if ((pathname === '/api/version' || pathname === '/version') && method === 'GET') {
+    let versionData = null;
+    try {
+      const vPath = path.join(__dirname, 'version.json');
+      if (fs.existsSync(vPath)) {
+        versionData = JSON.parse(fs.readFileSync(vPath, 'utf8'));
+      }
+    } catch (e) {
+      console.error('[Version Read Error]', e.message);
+    }
+    if (!versionData) {
+      versionData = {
+        version: "3.1.0",
+        name: "AI VIDEO LIBRARY v3.1.0",
+        releaseDate: "2026-11-04",
+        changelog: "Tách 2 cổng First/End Frame Google Flow & Tự động chạy tiếp Chuỗi Kịch Bản khi tạo lại",
+        patchUrl: "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.1.0/update-patch.zip",
+        mandatory: false
+      };
+    }
+    return sendJson(res, 200, { success: true, ...versionData });
+  }
+
+  // Admin update version endpoint
+  if (pathname === '/api/admin/version' && method === 'POST') {
+    if (!isAdmin) return sendJson(res, 401, { error: 'Unauthorized' });
+    try {
+      const vPath = path.join(__dirname, 'version.json');
+      fs.writeFileSync(vPath, JSON.stringify(body, null, 2), 'utf8');
+      return sendJson(res, 200, { success: true, version: body });
+    } catch (e) {
+      return sendJson(res, 500, { error: e.message });
+    }
+  }
+
+  // =========================================================================
   // SECTION A: ADMIN MANAGEMENT APIS (Machines, Keys, Orders, Settings)
   // =========================================================================
 

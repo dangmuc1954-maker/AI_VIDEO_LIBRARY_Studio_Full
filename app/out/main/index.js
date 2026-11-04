@@ -4118,7 +4118,14 @@ function extractPromptFromFlowResponse(rawText) {
   return null;
 }
 
-function MB(){E.handle("app:getVersion",A=>(C(A),F.getVersion())),E.handle("browser:listProviders",A=>(C(A),T.listProviders())),E.handle("browser:listSessions",A=>(C(A),T.listSessions())),
+function MB(){
+  try {
+    const updaterMod = require('./updater.cjs');
+    updaterMod.registerUpdaterHandlers(E, F, C);
+  } catch (err) {
+    console.error('[Updater Init Error]', err);
+  }
+  E.handle("app:getVersion",A=>(C(A),F.getVersion())),E.handle("browser:listProviders",A=>(C(A),T.listProviders())),E.handle("browser:listSessions",A=>(C(A),T.listSessions())),
 
 E.handle("browser:analyzeMotion", async (event, payload) => {
   C(event);

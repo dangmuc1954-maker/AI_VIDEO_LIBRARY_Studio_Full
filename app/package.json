@@ -1,7 +1,7 @@
 {
   "name": "ai-video-library",
   "private": true,
-  "version": "0.1.0-build.20260912124003",
+  "version": "3.1.0",
   "description": "AI VIDEO LIBRARY - Creative AI Video & Workflow Studio",
   "author": "AI VIDEO LIBRARY",
   "type": "module",

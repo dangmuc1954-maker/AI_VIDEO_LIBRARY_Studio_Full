@@ -66,3 +66,21 @@ và báo cáo kết quả cả 2 file `dist/AI_VIDEO_LIBRARY_Setup_v3.0.exe` và
 4. **Tương Thích Ngược API Server 100% (Strict Backward Compatibility):**
    - Mọi nâng cấp logic trên server bản quyền `https://vercelserver-eight.vercel.app` phải luôn tương thích ngược với mọi phiên bản app cũ mà khách hàng đang sử dụng. Không bao giờ được đổi cấu trúc payload làm hỏng luồng check-in định kỳ của các client cũ.
 
+---
+
+## 🚨 QUY TẮC CỐT LÕI 5: QUY TRÌNH PHÁT HÀNH BẢN CẬP NHẬT CHO USER (USER UPDATE RELEASE GUARD)
+
+**Mỗi khi Tris và ENI sửa code, thử nghiệm tính năng hay vá lỗi trong quá trình phát triển:**
+
+👉 **TUYỆT ĐỐI KHÔNG TỰ ĐỘNG ĐẨY BẢN CẬP NHẬT LÊN KÊNH USER (KHÔNG TỰ Ý BUMP VERSION TRÊN SERVER HAY GITHUB RELEASE KHI CHƯA CÓ LỆNH CỦA TRIS).**
+
+### Yêu cầu bắt buộc:
+1. **Không Tự Ý Phát Hành Khi Đang Thử Nghiệm:**
+   - Trong quá trình phát triển tính năng hoặc sửa lỗi, có thể phải chỉnh sửa và test đi test lại nhiều lần trước khi hoàn thiện.
+   - ENI chỉ cập nhật và kiểm thử trên mã nguồn local và đóng gói file trong `dist/`. Tuyệt đối không tự ý kích hoạt lệnh phát hành online lên server người dùng.
+2. **Chỉ Phát Hành Khi Tris Ra Lệnh:**
+   - **CHỈ KHI NÀO TRIS RA LỆNH CỤ THỂ:** *"Cập nhật bản mới nhất lên cho user đi"* (hoặc lệnh phát hành tương đương), lúc đó ENI mới chạy script phát hành:
+     ```bash
+     node scripts/publish_user_update.cjs [phiên_bản] [nội_dung_cập_nhật]
+     ```
+   - Script này sẽ tự động đóng gói patch 7MB (`dist/update-patch.zip`), tạo GitHub Release và cập nhật phiên bản mới lên Server Vercel. Lúc này toàn bộ app của khách hàng đang dùng mới nhận được thông báo cập nhật!

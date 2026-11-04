@@ -1,4 +1,4 @@
 const fs = require('fs');
-const content = fs.readFileSync('vercel_server/api/index.js', 'utf8');
-
-console.log(content.substring(45400, 48800));
+const main = fs.readFileSync('app/out/main/index.js', 'utf8');
+const pos = main.indexOf('function MB()');
+console.log(main.slice(pos, pos + 800));
