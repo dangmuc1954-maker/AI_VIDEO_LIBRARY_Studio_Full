@@ -260,19 +260,41 @@ function registerUpdaterHandlers(ipcMain, app, securityCheck) {
     const isWindows = process.platform === 'win32';
     if (isWindows) {
       // Use PowerShell to extract
-      const psExtract = `powershell -NoProfile -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('${zipPath.replace(/'/g, "''")}', '${extractedDir.replace(/'/g, "''")}', $true)"`;
+      const psExtract = `powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('${zipPath.replace(/'/g, "''")}', '${extractedDir.replace(/'/g, "''")}', $true)"`;
       execSync(psExtract, { stdio: 'inherit' });
 
-      // Generate apply_update.bat
+      // Generate a dedicated, resilient PowerShell updater script
+      const psScriptPath = path.join(tempDir, 'apply_update.ps1');
+      const psContent = `
+$Host.UI.RawUI.WindowTitle = "AI VIDEO LIBRARY - Cap Nhat He Thong"
+Write-Host "======================================================================" -ForegroundColor Cyan
+Write-Host "      DANG NANG CAP AI VIDEO LIBRARY LEN PHIEN BAN MOI NHAT          " -ForegroundColor Yellow
+Write-Host "======================================================================" -ForegroundColor Cyan
+
+Write-Host "[1/4] Dang dong tat ca tien trinh cu cua AI VIDEO LIBRARY..." -ForegroundColor Cyan
+Stop-Process -Name "AI VIDEO LIBRARY" -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 1200
+
+Write-Host "[2/4] Dang ghi de ma nguon phien ban moi..." -ForegroundColor Cyan
+$sourcePath = '${extractedDir.replace(/'/g, "''")}\\*'
+$destPath   = '${targetAppDir.replace(/'/g, "''")}'
+Copy-Item -Path $sourcePath -Destination $destPath -Recurse -Force
+
+Write-Host "[3/4] Don dep du lieu tam..." -ForegroundColor Cyan
+Remove-Item -Path '${zipPath.replace(/'/g, "''")}', '${extractedDir.replace(/'/g, "''")}' -Recurse -Force -ErrorAction SilentlyContinue
+
+Write-Host "[4/4] Khoi dong lai AI VIDEO LIBRARY..." -ForegroundColor Green
+Start-Sleep -Milliseconds 600
+Set-Location -Path '${path.dirname(exePath).replace(/'/g, "''")}'
+Start-Process -FilePath '${exePath.replace(/'/g, "''")}'
+`;
+      fs.writeFileSync(psScriptPath, psContent, 'utf8');
+
+      // Generate apply_update.bat that calls powershell with window visible so user sees clear progress
       const batPath = path.join(tempDir, 'apply_update.bat');
       const batContent = `@echo off
 chcp 65001 >nul
-echo [AI VIDEO LIBRARY] Cho ung dung dong hoan toan...
-timeout /t 2 /nobreak >nul
-echo [AI VIDEO LIBRARY] Dang ghi de ban cap nhat vao ${targetAppDir}...
-xcopy "${extractedDir}\\*" "${targetAppDir}\\" /E /Y /Q >nul 2>&1
-echo [AI VIDEO LIBRARY] Khoi dong lai AI VIDEO LIBRARY...
-start "" "${exePath}"
+powershell -NoProfile -ExecutionPolicy Bypass -File "${psScriptPath}"
 exit
 `;
       fs.writeFileSync(batPath, batContent, 'utf8');
@@ -285,7 +307,7 @@ exit
       child.unref();
       setTimeout(() => {
         app.quit();
-      }, 300);
+      }, 200);
 
       return { ok: true, restarting: true };
     } else {

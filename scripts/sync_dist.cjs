@@ -80,14 +80,17 @@ for (const target of targets) {
   }
 
   // 4. Update package.json
+  const srcPkgPath = path.join(__dirname, '../app/package.json');
+  const srcPkg = fs.existsSync(srcPkgPath) ? JSON.parse(fs.readFileSync(srcPkgPath, 'utf8')) : {};
   const pkgPath = path.join(target, 'package.json');
   if (fs.existsSync(pkgPath)) {
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    if (srcPkg.version) pkg.version = srcPkg.version;
     pkg.dependencies = pkg.dependencies || {};
     pkg.dependencies['canvas-confetti'] = '^1.9.4';
     pkg.dependencies['@xenova/transformers'] = '^2.17.2';
     fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2), 'utf8');
-    console.log('  ✓ Đã cập nhật package.json');
+    console.log('  ✓ Đã cập nhật package.json lên version', pkg.version);
   }
 
   // 5. Copy Cap_Quyen_Ghi_O_Dia_D.bat tool
