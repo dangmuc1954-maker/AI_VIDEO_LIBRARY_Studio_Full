@@ -266,45 +266,42 @@ function registerUpdaterHandlers(ipcMain, app, securityCheck) {
       // Generate a dedicated, resilient PowerShell updater script
       const psScriptPath = path.join(tempDir, 'apply_update.ps1');
       const psContent = `
-$Host.UI.RawUI.WindowTitle = "AI VIDEO LIBRARY - Cap Nhat He Thong"
-Write-Host "======================================================================" -ForegroundColor Cyan
-Write-Host "      DANG NANG CAP AI VIDEO LIBRARY LEN PHIEN BAN MOI NHAT          " -ForegroundColor Yellow
-Write-Host "======================================================================" -ForegroundColor Cyan
+$targetDir = '${targetAppDir.replace(/'/g, "''")}'
+$srcDir    = '${extractedDir.replace(/'/g, "''")}'
+$exe       = '${exePath.replace(/'/g, "''")}'
+$exeDir    = '${path.dirname(exePath).replace(/'/g, "''")}'
+$zip       = '${zipPath.replace(/'/g, "''")}'
 
-Write-Host "[1/4] Dang dong tat ca tien trinh cu cua AI VIDEO LIBRARY..." -ForegroundColor Cyan
+# 1. Dong sach tat ca tien trinh cu
 Stop-Process -Name "AI VIDEO LIBRARY" -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 1200
 
-Write-Host "[2/4] Dang ghi de ma nguon phien ban moi..." -ForegroundColor Cyan
-$sourcePath = '${extractedDir.replace(/'/g, "''")}\\*'
-$destPath   = '${targetAppDir.replace(/'/g, "''")}'
-Copy-Item -Path $sourcePath -Destination $destPath -Recurse -Force
+# 2. Ghi de ma nguon moi nhat
+Copy-Item -Path "$srcDir\\*" -Destination $targetDir -Recurse -Force
 
-Write-Host "[3/4] Don dep du lieu tam..." -ForegroundColor Cyan
-Remove-Item -Path '${zipPath.replace(/'/g, "''")}', '${extractedDir.replace(/'/g, "''")}' -Recurse -Force -ErrorAction SilentlyContinue
+# 3. Don dep tep tam
+Remove-Item -Path $zip, $srcDir -Recurse -Force -ErrorAction SilentlyContinue
 
-Write-Host "[4/4] Khoi dong lai AI VIDEO LIBRARY..." -ForegroundColor Green
-Start-Sleep -Milliseconds 600
-Set-Location -Path '${path.dirname(exePath).replace(/'/g, "''")}'
-Start-Process -FilePath '${exePath.replace(/'/g, "''")}'
+# 4. Khoi dong lai ung dung am tham, muot ma
+Start-Sleep -Milliseconds 500
+Set-Location -Path $exeDir
+Start-Process -FilePath $exe
 `;
       fs.writeFileSync(psScriptPath, psContent, 'utf8');
 
-      // Generate apply_update.bat that calls powershell with window visible so user sees clear progress
-      const batPath = path.join(tempDir, 'apply_update.bat');
-      const batContent = `@echo off
-chcp 65001 >nul
-powershell -NoProfile -ExecutionPolicy Bypass -File "${psScriptPath}"
-exit
-`;
-      fs.writeFileSync(batPath, batContent, 'utf8');
+      // Generate apply_update.vbs for 100% SILENT / INVISIBLE execution (Zero black CMD window)
+      const vbsPath = path.join(tempDir, 'apply_update.vbs');
+      const vbsContent = `Set WshShell = CreateObject("WScript.Shell")\nWshShell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""${psScriptPath}""", 0, False\n`;
+      fs.writeFileSync(vbsPath, vbsContent, 'utf8');
 
-      // Launch batch detached & quit app
-      const child = spawn('cmd.exe', ['/c', batPath], {
+      // Launch wscript detached and completely silent (Zero console window)
+      const child = spawn('wscript.exe', ['//B', '//Nologo', vbsPath], {
         detached: true,
-        stdio: 'ignore'
+        stdio: 'ignore',
+        windowsHide: true
       });
       child.unref();
+
       setTimeout(() => {
         app.quit();
       }, 200);
