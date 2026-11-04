@@ -2956,9 +2956,12 @@ class MuseVideoRuntime {
       // Kiểm tra trước nếu tài khoản hết credits / cần nâng cấp
       const preCheck = await wc.executeJavaScript(`
         (() => {
-          const text = (document.body?.innerText || '').toLowerCase();
-          if (text.includes('upgrade to pro') || text.includes('upgrade your plan') || text.includes('out of credits') || text.includes('hết credit')) {
-            return { blocked: true, reason: "Tài khoản Muse AI đã hết credits hoặc cần nâng cấp gói Pro để tiếp tục tạo video." };
+          const modal = document.querySelector('[role="dialog"], .modal, [class*="modal" i], [class*="dialog" i]');
+          if (modal && modal.offsetWidth > 0 && modal.offsetHeight > 0) {
+            const text = (modal.innerText || '').toLowerCase();
+            if ((text.includes('out of credit') || text.includes('no credits left') || text.includes('insufficient credit') || text.includes('hết credit')) && !text.includes('create video')) {
+              return { blocked: true, reason: "Tài khoản Muse AI đã hết credits hoặc cần nạp thêm credit để tiếp tục tạo video." };
+            }
           }
           return { blocked: false };
         })()
@@ -3291,8 +3294,8 @@ class MuseVideoRuntime {
           const modal = document.querySelector('[role="dialog"], .modal, [class*="dialog"]');
           if (modal && modal.offsetWidth > 0) {
             const mt = (modal.innerText || '').toLowerCase();
-            if (mt.includes('upgrade') || mt.includes('credit') || mt.includes('limit') || mt.includes('plan')) {
-              return { error: "Tài khoản Muse AI đã hết hạn mức hoặc yêu cầu nâng cấp gói!" };
+            if ((mt.includes('out of credit') || mt.includes('no credits left') || mt.includes('insufficient credit') || mt.includes('hết credit')) && !mt.includes('create video')) {
+              return { error: "Tài khoản Muse AI đã hết hạn mức hoặc hết credits!" };
             }
           }
           return { ok: true, url: window.location.href };
@@ -3344,26 +3347,63 @@ class MuseVideoRuntime {
 
       tracker.updateProgress(35, isImageJob ? "Prompt đã gửi thành công! Đang theo dõi tiến trình tạo ảnh Muse AI..." : "Prompt đã gửi thành công! Đang theo dõi tiến trình tạo video...");
 
-      // 5. POLLING KẾT QUẢ HOÀN THÀNH (TIMEOUT TỐI ĐA 4 PHÚT)
+      // 5. POLLING KẾT QUẢ HOÀN THÀNH (HỖ TRỢ 2 CHẾ ĐỘ: GIỚI HẠN 8 PHÚT HOẶC CHỜ ĐẾN KHI XONG)
+      const isLimit8m = Boolean(job.payload?.timeoutLimit === true || job.payload?.timeoutMode === "limit_8m");
       const startTime = Date.now();
-      const timeoutMs = 4 * 60 * 1000;
+      const timeoutMs = isImageJob ? (4 * 60 * 1000) : (isLimit8m ? (8 * 60 * 1000) : (24 * 60 * 60 * 1000));
       let videoBytes = null;
       let finalVideoUrl = "";
+
+      logDebug("Muse polling configuration", { isImageJob, isLimit8m, timeoutMs, jobId: job.id });
 
       while (Date.now() - startTime < timeoutMs) {
         if (tracker.signal?.aborted) throw new Error("Tác vụ đã bị người dùng hủy");
 
         const elapsed = Math.round((Date.now() - startTime) / 1000);
-        const curPct = Math.min(92, 35 + Math.floor(elapsed / 2.2));
-        tracker.updateProgress(curPct, isImageJob ? ("Muse AI đang vẽ ảnh (" + elapsed + "s)...") : ("Muse AI đang dựng video (" + elapsed + "s)..."));
+        const mins = Math.floor(elapsed / 60);
+        const secs = elapsed % 60;
+        const timeStr = mins + "p" + (secs < 10 ? "0" : "") + secs + "s";
+
+        let curPct;
+        let statusMsg;
+        if (isImageJob) {
+          curPct = Math.min(95, 35 + Math.floor(elapsed / 1.5));
+          statusMsg = "Muse AI đang vẽ ảnh (" + timeStr + ")...";
+        } else if (isLimit8m) {
+          curPct = Math.min(95, 35 + Math.floor((elapsed / 480) * 60));
+          statusMsg = "Muse AI đang dựng video (" + timeStr + " / tối đa 8p)...";
+        } else {
+          curPct = Math.min(95, 35 + Math.floor((elapsed / 600) * 60));
+          statusMsg = "Muse AI đang dựng video (" + timeStr + " - Chế độ chờ đến khi xong)...";
+        }
+        tracker.updateProgress(curPct, statusMsg);
+
+        // Cuộn trang nhẹ nhàng để đảm bảo các thành phần video mới hiển thị trong viewport
+        if (elapsed % 10 === 0) {
+          try {
+            await wc.executeJavaScript("window.scrollTo(0, document.body.scrollHeight);", true);
+          } catch (_) {}
+        }
 
         // Quét kết quả thời gian thực
         const scanRes = await wc.executeJavaScript(`
           (() => {
             try {
               const bodyText = (document.body?.innerText || '').toLowerCase();
-              if (bodyText.includes('upgrade to pro') || bodyText.includes('out of credits') || bodyText.includes('hết credit')) {
-                return { hasError: true, error: "Tài khoản Muse AI đã hết credits." };
+              // Kiểm tra xem có popup hoặc thông báo lỗi thật sự không (không check toàn trang tránh dính menu 'Upgrade to Pro' ở thanh sidebar)
+              const errorModal = document.querySelector('[role="dialog"], .modal, [class*="dialog" i], [class*="modal" i]');
+              if (errorModal && errorModal.offsetWidth > 0 && errorModal.offsetHeight > 0) {
+                const emText = (errorModal.innerText || '').toLowerCase();
+                if ((emText.includes('out of credit') || emText.includes('no credits left') || emText.includes('insufficient credit') || emText.includes('hết credit')) && !emText.includes('create video')) {
+                  return { hasError: true, error: "Tài khoản Muse AI đã hết credits." };
+                }
+              }
+              const alertBox = document.querySelector('[role="alert"], [class*="alert" i], [class*="toast" i]');
+              if (alertBox && alertBox.offsetWidth > 0) {
+                const atText = (alertBox.innerText || '').toLowerCase();
+                if (atText.includes('failed to generate') || atText.includes('generation error') || atText.includes('tạo video thất bại')) {
+                  return { hasError: true, error: "Muse AI báo lỗi: " + (alertBox.innerText.slice(0, 120)) };
+                }
               }
 
               const log = document.querySelector('[role="log"]') || document.body;
@@ -3577,7 +3617,7 @@ class MuseVideoRuntime {
                 logDebug("Candidate blob size check", { byteLength: bytes.length });
 
                 // Lọc bỏ mascot / video avatar mở đầu (< 1,000,000 bytes)
-                if (bytes.length < 1000000) {
+                if (bytes.length < 250000) {
                   logDebug("Mascot avatar skipped (" + bytes.length + " bytes), waiting for real video...");
                 } else {
                   videoBytes = bytes;
@@ -3599,8 +3639,9 @@ class MuseVideoRuntime {
         throw new Error("Quá thời gian chờ tạo ảnh trên Muse AI (4 phút). Vui lòng thử lại với prompt khác hoặc kiểm tra tài khoản Muse AI.");
       }
 
-      if (!videoBytes || videoBytes.length < 1000000) {
-        throw new Error("Quá thời gian chờ tạo video trên Muse AI (4 phút). Vui lòng thử lại với prompt ngắn hơn hoặc kiểm tra tài khoản Muse AI.");
+      if (!videoBytes || videoBytes.length < 250000) {
+        const limitDesc = isLimit8m ? "8 phút" : "thời gian chờ hoàn thành";
+        throw new Error("Quá thời gian chờ tạo video trên Muse AI (" + limitDesc + "). Vui lòng thử lại hoặc kiểm tra trực tiếp tài khoản Muse AI trong Browser Hub.");
       }
 
       tracker.updateProgress(98, "Đang lưu video vào Thư viện...");
