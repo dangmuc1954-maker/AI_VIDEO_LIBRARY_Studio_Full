@@ -3325,23 +3325,29 @@ class MuseVideoRuntime {
       }).filter(s => s > 0);
       logDebug("Reference file sizes for exclusion", { refFileSizes });
 
-      // CHỤP SNAPSHOT TẤT CẢ ẢNH ĐANG CÓ TRÊN TRANG NGAY KHI VỪA GỬI XONG ĐỂ LÀM DANH SÁCH LOẠI TRỪ (BASELINE)
-      const baselineSnapshot = await wc.executeJavaScript(`
+      // CHỤP SNAPSHOT TẤT CẢ ẢNH VÀ VIDEO ĐANG CÓ TRÊN TRANG ĐỂ LOẠI TRỪ TUYỆT ĐỐI (LOẠI BỎ 100% MASCOT / LOGO BAN ĐẦU)
+      const baselineMediaSnapshot = await wc.executeJavaScript(`
         (() => {
           try {
-            const list = [];
+            const imgs = [];
             document.querySelectorAll('img').forEach(img => {
               const s = img.currentSrc || img.src;
-              if (s) list.push(s);
+              if (s) imgs.push(s);
             });
-            return list;
+            const vids = [];
+            document.querySelectorAll('video').forEach(v => {
+              const s = v.currentSrc || v.src || v.querySelector('source')?.src || v.getAttribute('src');
+              if (s) vids.push(s);
+            });
+            return { imgs, vids };
           } catch(e) {
-            return [];
+            return { imgs: [], vids: [] };
           }
         })()
-      `, true).catch(() => []);
-      const knownInputImages = Array.from(new Set(baselineSnapshot || []));
-      logDebug("Known input images baseline captured", { count: knownInputImages.length });
+      `, true).catch(() => ({ imgs: [], vids: [] }));
+      const knownInputImages = Array.from(new Set(baselineMediaSnapshot?.imgs || []));
+      const knownInputVideos = Array.from(new Set(baselineMediaSnapshot?.vids || []));
+      logDebug("Baseline captured", { imgCount: knownInputImages.length, vidCount: knownInputVideos.length });
 
       tracker.updateProgress(35, isImageJob ? "Prompt đã gửi thành công! Đang theo dõi tiến trình tạo ảnh Muse AI..." : "Prompt đã gửi thành công! Đang theo dõi tiến trình tạo video...");
 
@@ -3406,6 +3412,18 @@ class MuseVideoRuntime {
 
               const log = document.querySelector('[role="log"]') || document.body;
 
+              // Định vị phần tử prompt của người dùng để phân tách: kết quả BẮT BUỘC phải nằm sau vị trí tin nhắn prompt
+              const promptSnippet = ${JSON.stringify(prompt.slice(0, 35).trim())};
+              let promptNode = null;
+              if (promptSnippet) {
+                const allTextNodes = Array.from(document.querySelectorAll('*')).filter(el => {
+                  return el.children.length === 0 && (el.innerText || el.textContent || '').includes(promptSnippet);
+                });
+                if (allTextNodes.length > 0) {
+                  promptNode = allTextNodes[allTextNodes.length - 1];
+                }
+              }
+
               // 1. NẾU LÀ TẠO ẢNH: QUÉT THẺ IMG VÀ LINK ẢNH CỦA BOT TRẢ VỀ
               const isImg = ${isImageJob};
               if (isImg) {
@@ -3418,16 +3436,6 @@ class MuseVideoRuntime {
                 }
 
                 const knownInputs = new Set(${JSON.stringify(knownInputImages)});
-                const promptSnippet = ${JSON.stringify(prompt.slice(0, 35).trim())};
-                let promptNode = null;
-                if (promptSnippet) {
-                  const allTextNodes = Array.from(document.querySelectorAll('*')).filter(el => {
-                    return el.children.length === 0 && (el.innerText || el.textContent || '').includes(promptSnippet);
-                  });
-                  if (allTextNodes.length > 0) {
-                    promptNode = allTextNodes[allTextNodes.length - 1];
-                  }
-                }
 
                 const allImgs = Array.from(log.querySelectorAll('img'));
                 const candidateImgs = allImgs.filter(img => {
@@ -3469,6 +3477,13 @@ class MuseVideoRuntime {
 
               // 2. QUÉT VIDEO (CHO JOB VIDEO HOẶC FALLBACK NẾU MUSE XUẤT VIDEO)
               if (!isImg) {
+                // Video AI thực sự không thể nào render xong dưới 20 giây! Tuyệt đối không quét trong 20s đầu để tránh tóm nhầm mascot
+                if (${elapsed} < 20) {
+                  return { found: false, isGenerating: true };
+                }
+
+                const knownVideos = new Set(${JSON.stringify(knownInputVideos)});
+
                 // Tầng A: Nhận diện phản hồi bot thông báo video hoàn thành ("video mới xong", "đã tạo xong", "video ready", "render 100%", etc.)
                 const botMsgs = Array.from(document.querySelectorAll('div, p, span')).filter(el => {
                   if (el.children.length > 2) return false;
@@ -3478,69 +3493,88 @@ class MuseVideoRuntime {
 
                 for (let i = botMsgs.length - 1; i >= 0; i--) {
                   const msgEl = botMsgs[i];
+                  // BẮT BUỘC: Tin nhắn bot phải xuất hiện SAU tin nhắn prompt của người dùng
+                  if (promptNode) {
+                    const pos = promptNode.compareDocumentPosition(msgEl);
+                    if (!(pos & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+                  }
+
                   const container = msgEl.closest('[class*="message"], [class*="chat"], [class*="item"], div') || msgEl.parentElement;
                   if (container) {
                     const v = container.querySelector('video');
                     if (v) {
+                      const dur = v.duration || 0;
+                      // Tuyệt đối loại bỏ video mascot logo (5.04 giây)
+                      if (Math.abs(dur - 5.041667) < 0.05 || (dur > 5.03 && dur < 5.06)) continue;
+
                       const u = v.currentSrc || v.src || v.querySelector('source')?.src || v.getAttribute('src');
-                      if (u && (u.startsWith('http') || u.startsWith('blob:'))) {
-                        return { found: true, mediaType: 'video', url: u, fromMsg: true };
+                      if (u && !knownVideos.has(u) && (u.startsWith('http') || u.startsWith('blob:'))) {
+                        return { found: true, mediaType: 'video', url: u, duration: dur, fromMsg: true };
                       }
                     }
                     const a = container.querySelector('a[href*=".mp4"], a[download], a[href*="blob:"]');
-                    if (a && a.href) {
+                    if (a && a.href && !knownVideos.has(a.href)) {
                       return { found: true, mediaType: 'video', url: a.href, fromMsg: true };
                     }
                   }
                 }
 
-                // Tầng B: Quét thuộc tính hatch video
+                // Tầng B: Quét thuộc tính hatch video (phải nằm sau promptNode)
                 const hatchVideos = Array.from(log.querySelectorAll('[data-hatch-video-src]'));
                 for (let i = hatchVideos.length - 1; i >= 0; i--) {
                   const e = hatchVideos[i];
+                  if (promptNode) {
+                    const pos = promptNode.compareDocumentPosition(e);
+                    if (!(pos & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+                  }
                   const u = e.getAttribute('data-hatch-video-src');
-                  if (u && (u.startsWith('http') || u.startsWith('blob:'))) {
+                  if (u && !knownVideos.has(u) && (u.startsWith('http') || u.startsWith('blob:'))) {
                     return { found: true, mediaType: 'video', url: u };
                   }
                 }
 
-                // Tầng C: Quét toàn bộ thẻ video trong trang, kích hoạt load nếu chưa nạp src
+                // Tầng C: Quét toàn bộ thẻ video trong trang NẰM SAU promptNode và KHÔNG PHẢI MASCOT
                 const videos = Array.from(document.querySelectorAll('video'));
                 for (let i = videos.length - 1; i >= 0; i--) {
                   const v = videos[i];
+                  const dur = v.duration || 0;
+                  // Tuyệt đối loại bỏ mascot logo (5.041667 giây)
+                  if (Math.abs(dur - 5.041667) < 0.05 || (dur > 5.03 && dur < 5.06)) continue;
+
+                  // BẮT BUỘC: Phải nằm sau tin nhắn prompt trong DOM
+                  if (promptNode) {
+                    const pos = promptNode.compareDocumentPosition(v);
+                    if (!(pos & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+                  }
+
                   let u = v.currentSrc || v.src || v.querySelector('source')?.src || v.getAttribute('src');
                   if (!u) {
                     try { v.load(); } catch(_) {}
                     u = v.currentSrc || v.src || v.querySelector('source')?.src;
                   }
-                  if (u && (u.startsWith('http') || u.startsWith('blob:'))) {
-                    return { found: true, mediaType: 'video', url: u, duration: v.duration || 0 };
+                  if (u && !knownVideos.has(u) && (u.startsWith('http') || u.startsWith('blob:'))) {
+                    return { found: true, mediaType: 'video', url: u, duration: dur };
                   }
                 }
 
-                // Tầng D: Quét data attributes (data-video-url, data-src, etc.)
-                const dataEls = Array.from(document.querySelectorAll('[data-video-url], [data-src*=".mp4"], [data-url*=".mp4"], [data-stream-url]'));
-                for (let i = dataEls.length - 1; i >= 0; i--) {
-                  const e = dataEls[i];
-                  const u = e.getAttribute('data-video-url') || e.getAttribute('data-src') || e.getAttribute('data-url') || e.getAttribute('data-stream-url');
-                  if (u && (u.startsWith('http') || u.startsWith('blob:'))) {
-                    return { found: true, mediaType: 'video', url: u };
-                  }
-                }
-
-                // Tầng E: Quét link tải video
+                // Tầng D: Quét link tải video nằm sau promptNode
                 const links = Array.from(document.querySelectorAll('a[href*=".mp4"], a[download], a[href*="stream.muse.ai"], a[href*="cdn.muse.ai/video"]'));
                 for (let i = links.length - 1; i >= 0; i--) {
                   const a = links[i];
-                  if (a.href) return { found: true, mediaType: 'video', url: a.href };
+                  if (promptNode) {
+                    const pos = promptNode.compareDocumentPosition(a);
+                    if (!(pos & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+                  }
+                  if (a.href && !knownVideos.has(a.href)) return { found: true, mediaType: 'video', url: a.href };
                 }
 
-                // Tầng F: Quét Resource Timing Buffer của Chromium
+                // Tầng E: Quét Resource Timing Buffer của Chromium
                 const res = (window.performance && typeof window.performance.getEntriesByType === 'function')
                   ? window.performance.getEntriesByType('resource')
                   : [];
                 for (let i = res.length - 1; i >= 0; i--) {
                   const n = res[i].name || '';
+                  if (knownVideos.has(n)) continue;
                   if ((n.includes('.mp4') || n.includes('cdn.muse.ai/video') || n.includes('stream.muse.ai')) && (n.startsWith('http') || n.startsWith('blob:'))) {
                     return { found: true, mediaType: 'video', url: n, fromPerf: true };
                   }
@@ -3689,13 +3723,14 @@ class MuseVideoRuntime {
                 }
               }
 
-              if (bytes && bytes.length > 200000) {
+              // LỌC BỎ TUYỆT ĐỐI MASCOT / LOGO: Video AI Muse thực sự luôn có dung lượng > 1,200,000 bytes (1.2 MB). Mascot của Muse chỉ có 357,801 bytes.
+              if (bytes && bytes.length > 1000000) {
                 videoBytes = bytes;
                 finalVideoUrl = scanRes.url;
                 logDebug("Captured real video successfully!", { byteLength: videoBytes.length, url: finalVideoUrl });
                 break;
               } else if (bytes) {
-                logDebug("Video too small, skipping avatar/mascot (" + bytes.length + " bytes), continuing scan...");
+                logDebug("Skipping mascot/avatar/logo video under 1MB (" + bytes.length + " bytes), waiting for real AI video...");
               }
             } catch(e) {
               logDebug("Error reading candidate video blob", { error: e.message });
@@ -3710,7 +3745,7 @@ class MuseVideoRuntime {
         throw new Error("Quá thời gian chờ tạo ảnh trên Muse AI (4 phút). Vui lòng thử lại với prompt khác hoặc kiểm tra tài khoản Muse AI.");
       }
 
-      if (!videoBytes || videoBytes.length < 200000) {
+      if (!videoBytes || videoBytes.length < 1000000) {
         const limitDesc = isLimit8m ? "8 phút" : "12 phút";
         throw new Error("Quá thời gian chờ tạo video trên Muse AI (" + limitDesc + "). Vui lòng thử lại hoặc kiểm tra trực tiếp tài khoản Muse AI trong Browser Hub.");
       }
