@@ -66,3 +66,4 @@ Kết quả sẽ tự động xuất ra ngay trong thư mục `dist/`:
 1. **Server Bản Quyền Duy Nhất:** `https://vercelserver-eight.vercel.app` (Admin: `https://vercelserver-eight.vercel.app/admin`).
 2. **Bảo Mật Máy Khách:** Dữ liệu tài khoản `%APPDATA%\AI_VIDEO_LIBRARY_DATA` hoàn toàn độc lập theo từng máy phần cứng (HWID).
 3. **Mọi Bản Cập Nhật Mới** phải luôn đồng bộ và xuất ra cả 2 bản `dist/` qua `scripts/create_zip_and_installer.js`.
+
