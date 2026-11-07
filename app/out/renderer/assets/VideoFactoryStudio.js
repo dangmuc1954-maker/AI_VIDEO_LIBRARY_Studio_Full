@@ -2278,14 +2278,24 @@ function FashionKocProStudio({
       const validKocId = cs.koc ? await ensureRegisteredAsset(cs.koc, 'koc_model_face.jpg') : null;
       const validOutfitId = cs.outfit ? await ensureRegisteredAsset(cs.outfit, 'outfit_sample.jpg') : null;
 
+      const isScene1 = Number(frameId) === 1;
       const isFromScene3 = Number(frameId) >= 3;
-      // Từ video cảnh 3 trở đi: chỉ nạp đúng prompt do AI phân tích và ĐÚNG 1 ẢNH THAM CHIẾU CẢNH ĐÓ, không nạp thêm KOC hay Outfit
-      const sceneRefIds = isFromScene3 
-        ? [validAssetId].filter(Boolean) 
-        : [validAssetId, validKocId, validOutfitId].filter(Boolean);
-      const extraRefMediaIds = isFromScene3 
-        ? [] 
-        : [validKocId, validOutfitId].filter(Boolean);
+      // 🎯 QUY TẮC NẠP ẢNH THAM CHIẾU VIDEO XƯỞNG THỜI TRANG:
+      // - Cảnh 1: Bắt buộc nạp ĐÚNG 2 ảnh [Ảnh Cảnh 1 + Ảnh tham chiếu Outfit] để khi bóc bao hàng lôi ra đúng bộ đồ tham chiếu (loại bỏ KOC face để AI không bị loãng/nhầm lẫn)
+      // - Cảnh 2: Nạp [Ảnh Cảnh 2 + Ảnh tham chiếu Outfit]
+      // - Cảnh 3 trở đi: Chỉ nạp ĐÚNG 1 ảnh của cảnh đó [Ảnh Cảnh đó]
+      let sceneRefIds = [];
+      let extraRefMediaIds = [];
+      if (isScene1) {
+        sceneRefIds = [validAssetId, validOutfitId].filter(Boolean);
+        extraRefMediaIds = [validOutfitId].filter(Boolean);
+      } else if (isFromScene3) {
+        sceneRefIds = [validAssetId].filter(Boolean);
+        extraRefMediaIds = [];
+      } else {
+        sceneRefIds = [validAssetId, validOutfitId].filter(Boolean);
+        extraRefMediaIds = [validOutfitId].filter(Boolean);
+      }
 
       const modelDisplayName = FASHION_VIDEO_MODELS_MAP[cs.globalVideoModel] || 'veo-3.1-lite';
 
@@ -2324,7 +2334,7 @@ function FashionKocProStudio({
           flowVideoMode: validAssetId ? "I2V" : "T2V",
           videoMode: validAssetId ? "I2V" : "T2V",
           mode: validAssetId ? "I2V" : "T2V",
-          referenceAssetIds: validAssetId ? [validAssetId] : [],
+          referenceAssetIds: sceneRefIds,
           inputImageAssetId: validAssetId || undefined,
           firstFrameImageMediaId: validAssetId || undefined,
           startImageMediaId: validAssetId || undefined,
@@ -2449,14 +2459,24 @@ function FashionKocProStudio({
         const validKocId = cs.koc ? await ensureRegisteredAsset(cs.koc, 'koc_model_face.jpg') : null;
         const validOutfitId = cs.outfit ? await ensureRegisteredAsset(cs.outfit, 'outfit_sample.jpg') : null;
 
+        const isScene1 = Number(frame.id) === 1;
         const isFromScene3 = Number(frame.id) >= 3;
-        // Từ video cảnh 3 trở đi: chỉ nạp đúng prompt do AI phân tích và ĐÚNG 1 ẢNH THAM CHIẾU CẢNH ĐÓ, không nạp thêm KOC hay Outfit
-        const sceneRefIds = isFromScene3 
-          ? [validAssetId].filter(Boolean) 
-          : [validAssetId, validKocId, validOutfitId].filter(Boolean);
-        const extraRefMediaIds = isFromScene3 
-          ? [] 
-          : [validKocId, validOutfitId].filter(Boolean);
+        // 🎯 QUY TẮC NẠP ẢNH THAM CHIẾU VIDEO XƯỞNG THỜI TRANG:
+        // - Cảnh 1: Bắt buộc nạp ĐÚNG 2 ảnh [Ảnh Cảnh 1 + Ảnh tham chiếu Outfit] để khi bóc bao hàng lôi ra đúng bộ đồ tham chiếu (loại bỏ KOC face để AI không bị loãng/nhầm lẫn)
+        // - Cảnh 2: Nạp [Ảnh Cảnh 2 + Ảnh tham chiếu Outfit]
+        // - Cảnh 3 trở đi: Chỉ nạp ĐÚNG 1 ảnh của cảnh đó [Ảnh Cảnh đó]
+        let sceneRefIds = [];
+        let extraRefMediaIds = [];
+        if (isScene1) {
+          sceneRefIds = [validAssetId, validOutfitId].filter(Boolean);
+          extraRefMediaIds = [validOutfitId].filter(Boolean);
+        } else if (isFromScene3) {
+          sceneRefIds = [validAssetId].filter(Boolean);
+          extraRefMediaIds = [];
+        } else {
+          sceneRefIds = [validAssetId, validOutfitId].filter(Boolean);
+          extraRefMediaIds = [validOutfitId].filter(Boolean);
+        }
 
         const promptToSend = frame.videoPrompt || getSmartMotionPrompt(frame.id, cs.creativeDirection, cs.outfit?.name || cs.outfit?.productName || cs.outfitName);
 
@@ -2497,7 +2517,7 @@ function FashionKocProStudio({
             flowVideoMode: validAssetId ? "I2V" : "T2V",
             videoMode: validAssetId ? "I2V" : "T2V",
             mode: validAssetId ? "I2V" : "T2V",
-            referenceAssetIds: validAssetId ? [validAssetId] : [],
+            referenceAssetIds: sceneRefIds,
             inputImageAssetId: validAssetId || undefined,
             firstFrameImageMediaId: validAssetId || undefined,
             startImageMediaId: validAssetId || undefined,

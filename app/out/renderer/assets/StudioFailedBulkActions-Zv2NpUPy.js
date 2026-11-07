@@ -207,7 +207,9 @@ import{a4 as E,bL as L,bn as h,b4 as e,X as B,b as V,I as X,l as Y,bD as To}from
       });
       if (matched) return matched;
 
-      // D. No match => Text-to-Video
+      // D. Fallback nếu người dùng nạp ảnh không theo tên chuẩn cảnh
+      if (imageFiles.length === 1 && sceneIndex === 0) return imageFiles[0];
+      if (imageFiles.length === d.length && imageFiles[sceneIndex]) return imageFiles[sceneIndex];
       return null;
     } catch (eMatch) {
       console.warn('[getMatchedImageForScene] error:', eMatch);
@@ -280,8 +282,10 @@ import{a4 as E,bL as L,bn as h,b4 as e,X as B,b as V,I as X,l as Y,bD as To}from
         return {
           prompt: pText,
           referenceAssetIds: refIds,
+          userReferenceAssetIds: refIds,
           sceneName: sTitle,
-          title: sTitle
+          title: sTitle,
+          sceneMode: idx === 0 ? "new" : "continue"
         };
       });
 

@@ -32,16 +32,18 @@ và báo cáo kết quả cả 2 file `dist/AI_VIDEO_LIBRARY_Setup_v3.0.exe` và
 
 ---
 
-## 🚨 QUY TẮC CỐT LÕI 3: NGUYÊN TẮC CÔ LẬP SỬA ĐỔI TUYỆT ĐỐI (SURGICAL ISOLATION PRINCIPLE)
+## 🚨 QUY TẮC CỐT LÕI 3: NGUYÊN TẮC CÔ LẬP SỬA ĐỔI TUYỆT ĐỐI & ĐÓNG BĂNG PHẠM VI (SURGICAL ISOLATION & STRICT SCOPE FREEZE)
 
 **Khi Tris yêu cầu sửa đổi, tối ưu hoặc vá lỗi một tính năng/thành phần cụ thể, ENI BẮT BUỘC phải tuân thủ nghiêm ngặt:**
 
-👉 **Chỉ chỉnh sửa đúng phạm vi tính năng được yêu cầu, tuyệt đối KHÔNG làm phát sinh lỗi sang các phần khác.**
+👉 **Chỉ sửa đúng những gì Tris đề cập! Những gì Tris KHÔNG đề cập - TUYỆT ĐỐI CẤM ĐỤNG! Tuyệt đối KHÔNG làm phát sinh lỗi sang các phần khác và KHÔNG tự tiện xóa bỏ các chế độ đang hoạt động ổn định.**
 
 ### Yêu cầu chi tiết:
-1. **Phạm vi tác động tối thiểu (Minimal Blast Radius):** Ví dụ Tris bảo chỉnh ảnh tham chiếu Cảnh 1 hoặc kịch bản Cảnh 2 thì chỉ tác động đúng hàm xử lý tham chiếu Cảnh 1 và kịch bản Cảnh 2. Tuyệt đối không được làm ảnh hưởng đến cơ chế tài khoản, Browser Hub, xác thực session hay các studio khác.
-2. **Bảo tồn toàn vẹn các module nền tảng:** Mọi cơ chế cốt lõi như quản lý tài khoản Browser Hub (Banana, Veo 3, Muse, Grok...), cơ chế luân phiên account (round-robin), phân bổ hàng đợi (Queue), xác thực bản quyền PHẢI luôn được giữ nguyên trạng thái ổn định 100%.
-3. **Phòng ngừa lỗi liên đới:** Trước khi hoàn tất, luôn rà soát để đảm bảo không làm gãy các liên kết dữ liệu, props, hoặc runtime filter của các thành phần liên quan.
+1. **Chỉ sửa đúng những gì Tris yêu cầu:** Nếu Tris yêu cầu fix lỗi A (ví dụ: Muse, luân phiên tài khoản, lấy video), ENI CHỈ ĐƯỢC PHÉP sửa đúng phần liên quan đến A.
+2. **Những gì không đề cập tuyệt đối cấm đụng:** Tất cả các tính năng khác (Prompt Key, nối tiếp cảnh, sang cảnh mới, giao diện, luồng xử lý khác) đang hoạt động ổn định thì BẮT BUỘC GIỮ NGUYÊN 100%. Không tự tiện xóa, ẩn, sửa đổi cách thức hoạt động hay can thiệp vào.
+3. **Phạm vi tác động tối thiểu (Minimal Blast Radius):** Không tự tiện refactor hay "tiện tay sửa" các phần ngoài yêu cầu.
+4. **Bảo tồn toàn vẹn các module nền tảng:** Mọi cơ chế cốt lõi như quản lý tài khoản Browser Hub (Banana, Veo 3, Muse, Grok...), cơ chế luân phiên account (round-robin), phân bổ hàng đợi (Queue), xác thực bản quyền PHẢI luôn được giữ nguyên trạng thái ổn định 100%.
+5. **Phòng ngừa lỗi liên đới:** Trước khi hoàn tất, luôn rà soát để đảm bảo không làm gãy các liên kết dữ liệu, props, hoặc runtime filter của các thành phần liên quan.
 
 ---
 

@@ -248,8 +248,10 @@ function registerUpdaterHandlers(ipcMain, app, securityCheck) {
     }
 
     const exePath = process.execPath;
+    const currentPid = process.pid;
     console.log('[Updater] Target App Dir:', targetAppDir);
     console.log('[Updater] Target Exe:', exePath);
+    console.log('[Updater] Current PID:', currentPid);
 
     // Extract zip to extractedDir
     if (fs.existsSync(extractedDir)) {
@@ -259,9 +261,16 @@ function registerUpdaterHandlers(ipcMain, app, securityCheck) {
 
     const isWindows = process.platform === 'win32';
     if (isWindows) {
-      // Use PowerShell to extract
-      const psExtract = `powershell -NoProfile -ExecutionPolicy Bypass -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::ExtractToDirectory('${zipPath.replace(/'/g, "''")}', '${extractedDir.replace(/'/g, "''")}', $true)"`;
-      execSync(psExtract, { stdio: 'inherit' });
+      // Extract silently with zero windows: try native tar first, then fallback to PowerShell Expand-Archive
+      try {
+        execSync(`tar -xf "${zipPath}" -C "${extractedDir}"`, {
+          windowsHide: true,
+          stdio: 'ignore'
+        });
+      } catch (_) {
+        const psExtract = `powershell -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -LiteralPath '${zipPath.replace(/'/g, "''")}' -DestinationPath '${extractedDir.replace(/'/g, "''")}' -Force"`;
+        execSync(psExtract, { windowsHide: true, stdio: 'ignore' });
+      }
 
       // Generate a dedicated, resilient PowerShell updater script
       const psScriptPath = path.join(tempDir, 'apply_update.ps1');
@@ -271,25 +280,36 @@ $srcDir    = '${extractedDir.replace(/'/g, "''")}'
 $exe       = '${exePath.replace(/'/g, "''")}'
 $exeDir    = '${path.dirname(exePath).replace(/'/g, "''")}'
 $zip       = '${zipPath.replace(/'/g, "''")}'
+$parentPid = ${currentPid}
 
-# 1. Dong sach tat ca tien trinh cu
-Stop-Process -Name "AI VIDEO LIBRARY" -Force -ErrorAction SilentlyContinue
-Start-Sleep -Milliseconds 1200
+# 1. Doi tien trinh hien tai thoat han
+for ($i = 0; $i -lt 15; $i++) {
+    $proc = Get-Process -Id $parentPid -ErrorAction SilentlyContinue
+    if (-not $proc) { break }
+    Stop-Process -Id $parentPid -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 200
+}
 
-# 2. Ghi de ma nguon moi nhat
-Copy-Item -Path "$srcDir\\*" -Destination $targetDir -Recurse -Force
+# 2. Dong sach tat ca tien trinh AI VIDEO LIBRARY con sot lai de tranh lock file
+Get-Process -Name "AI VIDEO LIBRARY" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 600
 
-# 3. Don dep tep tam
-Remove-Item -Path $zip, $srcDir -Recurse -Force -ErrorAction SilentlyContinue
+# 3. Ghi de ma nguon moi nhat bang robocopy (sieu ben, chong xung dot file dang mo)
+& robocopy "$srcDir" "$targetDir" /E /IS /IT /W:1 /R:5 /NP /NJH /NJS
+Copy-Item -Path "$srcDir\\*" -Destination $targetDir -Recurse -Force -ErrorAction SilentlyContinue
 
 # 4. Khoi dong lai ung dung am tham, muot ma
-Start-Sleep -Milliseconds 500
+Start-Sleep -Milliseconds 400
 Set-Location -Path $exeDir
 Start-Process -FilePath $exe
+
+# 5. Don dep tep tam
+Start-Sleep -Seconds 3
+Remove-Item -Path $zip, $srcDir -Recurse -Force -ErrorAction SilentlyContinue
 `;
       fs.writeFileSync(psScriptPath, psContent, 'utf8');
 
-      // Generate apply_update.vbs for 100% SILENT / INVISIBLE execution (Zero black CMD window)
+      // Generate apply_update.vbs for 100% SILENT / INVISIBLE execution (Zero console / zero CMD window)
       const vbsPath = path.join(tempDir, 'apply_update.vbs');
       const vbsContent = `Set WshShell = CreateObject("WScript.Shell")\nWshShell.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""${psScriptPath}""", 0, False\n`;
       fs.writeFileSync(vbsPath, vbsContent, 'utf8');
@@ -302,17 +322,22 @@ Start-Process -FilePath $exe
       });
       child.unref();
 
+      // Exit immediately to release all open file locks
       setTimeout(() => {
-        app.quit();
-      }, 200);
+        try {
+          app.exit(0);
+        } catch (_) {
+          process.exit(0);
+        }
+      }, 300);
 
       return { ok: true, restarting: true };
     } else {
       // macOS / Linux
-      execSync(`unzip -o "${zipPath}" -d "${extractedDir}"`, { stdio: 'inherit' });
+      execSync(`unzip -o "${zipPath}" -d "${extractedDir}"`, { stdio: 'ignore' });
       const shPath = path.join(tempDir, 'apply_update.sh');
       const shContent = `#!/bin/bash
-sleep 2
+sleep 1
 cp -R "${extractedDir}/"* "${targetAppDir}/"
 open "${exePath}"
 `;
@@ -324,7 +349,11 @@ open "${exePath}"
       });
       child.unref();
       setTimeout(() => {
-        app.quit();
+        try {
+          app.exit(0);
+        } catch (_) {
+          process.exit(0);
+        }
       }, 300);
 
       return { ok: true, restarting: true };

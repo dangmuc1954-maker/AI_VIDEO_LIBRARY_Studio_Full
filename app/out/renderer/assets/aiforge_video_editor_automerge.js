@@ -289,6 +289,10 @@
   // 8. MỞ PHÒNG DỰNG VIDEO EDITOR STUDIO
   // --------------------------------------------------------------------------------------------
   async function openVideoEditorStudio(initialAssetIds = []) {
+    // Giao diện HTML độc lập của module này chưa được build/biên dịch CSS đầy đủ
+    // (các class Tailwind dạng z-[99999], w-[98vw]... không có trong file CSS đã build
+    // nên hiển thị vỡ layout). Bảng dựng phim thật — đã test ổn định, đúng style —
+    // nằm trong VideoStudio (React). Luôn ưu tiên gọi qua đó.
     if (typeof window.__openAiforgeVideoEditorModal === 'function') {
       window.__openAiforgeVideoEditorModal(initialAssetIds);
       return;
@@ -298,28 +302,29 @@
     isEditorModalOpen = true;
     await loadVideoAssets();
 
-    // Khởi tạo timeline nếu trống
-    if (timelineClips.length === 0) {
-      if (initialAssetIds && initialAssetIds.length > 0) {
-        timelineClips = initialAssetIds.map((aid, i) => {
-          const a = videoAssetsCache.find(v => v.id === aid);
-          return {
-            id: 'seg-' + Date.now() + '-' + i + '-' + Math.random().toString(36).slice(2, 6),
-            assetId: aid,
-            name: getSceneTitleForAsset(a, i),
-            prompt: a?.prompt || a?.name || '',
-            url: a?.localPath ? `file://${a.localPath}` : (a?.thumbnailUrl || ''),
-            localPath: a?.localPath || '',
-            duration: a?.duration || 5,
-            startTime: 0,
-            endTime: a?.duration || 5,
-            thumbnailUrl: a?.thumbnailUrl || '',
-            width: a?.width || 1280,
-            height: a?.height || 720,
-            aspectRatio: a?.width && a?.height ? a.width / a.height : 16 / 9
-          };
-        });
-      }
+    // Nếu được gọi kèm danh sách assetIds cụ thể (vd: 1 dự án trong Studio Kịch Bản),
+    // LUÔN reset timeline đúng theo danh sách đó — tuyệt đối không lẫn video của dự án
+    // khác hay phiên làm việc trước còn sót lại trên timeline.
+    if (initialAssetIds && initialAssetIds.length > 0) {
+      timelineClips = initialAssetIds.map((aid, i) => {
+        const a = videoAssetsCache.find(v => v.id === aid);
+        return {
+          id: 'seg-' + Date.now() + '-' + i + '-' + Math.random().toString(36).slice(2, 6),
+          assetId: aid,
+          name: getSceneTitleForAsset(a, i),
+          prompt: a?.prompt || a?.name || '',
+          url: a?.localPath ? `file://${a.localPath}` : (a?.thumbnailUrl || ''),
+          localPath: a?.localPath || '',
+          duration: a?.duration || 5,
+          startTime: 0,
+          endTime: a?.duration || 5,
+          thumbnailUrl: a?.thumbnailUrl || '',
+          width: a?.width || 1280,
+          height: a?.height || 720,
+          aspectRatio: a?.width && a?.height ? a.width / a.height : 16 / 9
+        };
+      });
+      selectedClipId = timelineClips[0]?.id || null;
     }
 
     if (timelineClips.length > 0 && !selectedClipId) {
@@ -1248,14 +1253,14 @@
           endTime: c.endTime ? Number(c.endTime) : undefined
         }));
 
-        res = await assetsApi.editAndMergeVideos(payloadClips, activeTransition, {
+        res = await assetsApi.editAndMergeVideos(payloadClips, activeTransition === "dissolve" ? "fade" : activeTransition, {
           name: userGivenName.trim() || defaultName,
           outputAspect: activeRatio === 'fit' ? null : activeRatio,
           source: 'video-studio'
         });
       } else {
         const assetIds = timelineClips.map(c => c.assetId);
-        res = await assetsApi.mergeVideos(assetIds, activeTransition, {
+        res = await assetsApi.mergeVideos(assetIds, activeTransition === "dissolve" ? "fade" : activeTransition, {
           name: userGivenName.trim() || defaultName,
           outputAspect: activeRatio === 'fit' ? null : activeRatio,
           source: 'video-studio'
