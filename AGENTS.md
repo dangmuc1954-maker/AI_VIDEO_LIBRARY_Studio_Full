@@ -12,8 +12,9 @@
 - File `.zip` dành riêng cho người dùng MacBook (chạy file `Cai_Dat_Mac_1_Click.command` tự động nhận diện chip M hay Intel, gỡ bảo vệ Gatekeeper và cài vào `/Applications`).
 
 ### Quy trình thực hiện:
-Sau khi chỉnh sửa mã nguồn, luôn thực hiện lệnh:
+Sau khi chỉnh sửa mã nguồn, luôn thực hiện lệnh (bước kiểm tra lõi phải ra 2 dấu ✅ mới được đóng gói):
 ```bash
+node scripts/guard_model_core.cjs
 node scripts/sync_dist.cjs
 node scripts/create_zip_and_installer.js
 ```
@@ -86,3 +87,18 @@ và báo cáo kết quả cả 2 file `dist/AI_VIDEO_LIBRARY_Setup_v3.0.exe` và
      node scripts/publish_user_update.cjs [phiên_bản] [nội_dung_cập_nhật]
      ```
    - Script này sẽ tự động đóng gói patch 7MB (`dist/update-patch.zip`), tạo GitHub Release và cập nhật phiên bản mới lên Server Vercel. Lúc này toàn bộ app của khách hàng đang dùng mới nhận được thông báo cập nhật!
+
+---
+
+## 🚨 QUY TẮC CỐT LÕI 6: CÔ LẬP LÕI GỌI MODEL TẠO ẢNH / VIDEO (MODEL CORE ISOLATION)
+
+**Mỗi phần làm đúng việc của nó. Chức năng mới được chạy theo cách riêng, nhưng khi cần tạo ảnh / video thì PHẢI gọi model qua đúng quy trình chung.**
+
+👉 **Trước khi thêm hoặc sửa bất kỳ chức năng nào có gọi model (Veo3, Muse AI, Grok, Banana, Google Flow), BẮT BUỘC đọc và làm theo:** `.claude/skills/them-chuc-nang-goi-model/SKILL.md`
+
+### Tóm tắt:
+1. **Cấm sửa lõi gọi model khi thêm chức năng** (`app/out/main/index.js`, `preload/index.cjs`, Studio Video, Studio Ảnh, bộ chạy workflow, modal nhập prompt dùng chung; `index-BS7vgKVV.js` chỉ được thêm route/menu).
+2. **Chỉ gọi model qua** `window.aiforge.queue.addJobs` với job đúng định dạng Studio Video/Ảnh, chờ đúng `jobId`, đọc `job.result.assets`.
+3. **Không lấy kết quả bậy** (video mới nhất, quét chéo cửa sổ) và **không nuốt lỗi** bằng `catch` âm thầm.
+4. **Model lỗi trong chức năng mới → sửa trong chức năng mới.** Chỉ khi studio cũ cũng lỗi mới là lỗi lõi → dừng, báo Tris, chờ duyệt.
+5. **Khóa lõi tự động:** `node scripts/guard_model_core.cjs` chặn đóng gói nếu lõi bị đổi chưa duyệt. Chỉ chạy `--accept "lý do"` khi Tris đã đồng ý.
