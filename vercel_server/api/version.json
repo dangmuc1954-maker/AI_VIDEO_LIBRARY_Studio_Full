@@ -1,9 +1,9 @@
 {
-  "version": "3.1.5",
-  "name": "AI VIDEO LIBRARY v3.1.5",
+  "version": "3.1.6",
+  "name": "AI VIDEO LIBRARY v3.1.6",
   "releaseDate": "2026-11-12",
-  "changelog": "Studio Kịch Bản: sửa lỗi mất nối frame cuối (thử lại tự động, lỗi thì dừng và báo rõ để Tạo lại), nút Tạo Video chạy tiếp từ cảnh chưa xong, hiện rõ tên tài khoản trong ô chọn tài khoản",
-  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.1.5/update-patch.zip",
+  "changelog": "ElevenLabs: tự làm mới đăng nhập khi hết hạn, báo đúng lỗi khi ElevenLabs khóa gói miễn phí và tự chuyển sang tài khoản khác. Kho Workflow: đăng bán workflow (giá, video hướng dẫn tải từ máy, ảnh thumbnail), mua bằng QR tự cài vào máy.",
+  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.1.6/update-patch.zip",
   "mandatory": false,
   "minVersion": "3.0.0"
 }

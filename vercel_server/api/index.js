@@ -602,6 +602,15 @@ function getClientIp(req) {
   return req.socket?.remoteAddress || '127.0.0.1';
 }
 
+// Kho Workflow bán qua QR SePay — file riêng api/_workflow_store.js
+let wfStore = null;
+try {
+  const { createWorkflowStore } = require('./_workflow_store');
+  wfStore = createWorkflowStore({ KEY_DATA, SETTINGS, WORKFLOWS_DATA, isBannedMachine: mc => inMemoryStore.bannedMachines.has(String(mc).trim()) });
+} catch (e) {
+  console.error('[WorkflowStore init]', e);
+}
+
 // Main Handler for Vercel Serverless
 module.exports = async (req, res) => {
   if (req.method === 'OPTIONS') {
@@ -630,6 +639,12 @@ module.exports = async (req, res) => {
   const isAdmin = token === SETTINGS.adminPassword || token === 'admin' || queryAdminKey === 'admin' || token === '123456';
 
   console.log(`[Request] ${method} ${pathname} (Admin: ${isAdmin})`);
+
+  // KHO WORKFLOW: chạy trước các đường cũ (tránh "/download", "/orders/status" và webhook bản quyền bắt nhầm)
+  if (wfStore) {
+    const wfHandled = await wfStore.handle(req, res, { pathname, method, body, token });
+    if (wfHandled) return;
+  }
 
   // =========================================================================
   // DIRECT DOWNLOAD 1-CLICK HANDLER FOR AI_VIDEO_LIBRARY_Setup_v3.0.exe
