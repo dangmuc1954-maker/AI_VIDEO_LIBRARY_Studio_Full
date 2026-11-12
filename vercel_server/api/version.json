@@ -1,9 +1,9 @@
 {
-  "version": "3.1.8",
-  "name": "AI VIDEO LIBRARY v3.1.8",
+  "version": "3.1.9",
+  "name": "AI VIDEO LIBRARY v3.1.9",
   "releaseDate": "2026-11-12",
-  "changelog": "Video tham chiếu cho Veo3 (Omni Flash / Omni 1.2 Flash) ở Studio Video, Studio Kịch Bản và Workflow, thời lượng tự lấy theo video. Workflow: node Video tham chiếu, cổng video tham chiếu, cổng Frame cuối cho mọi node tạo video, thêm Omni 1.2 Flash, giao diện mới gọn dễ nhìn. ElevenLabs: dùng API Key làm tài khoản, báo rõ lỗi giọng thư viện.",
-  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.1.8/update-patch.zip",
+  "changelog": "Xóa watermark video Veo sạch như gốc, không nhòe (tính ngược độ trong suốt, tự dò dấu, tự chỉnh độ đậm từng video). Workflow: node Flow có video tham chiếu tự lấy thời lượng theo video (Auto), viền LED chạy quanh node khi đang tạo.",
+  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.1.9/update-patch.zip",
   "mandatory": false,
   "minVersion": "3.0.0"
 }

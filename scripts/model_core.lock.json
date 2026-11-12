@@ -1,6 +1,6 @@
 {
   "files": {
-    "app/out/main/index.js": "9a00072464fa8f21bafb7847fbc8f82397d1a40d923440678e1f3da583a57ed1",
+    "app/out/main/index.js": "32b31ee6f6b758a0a76345029b9eb0db038e280345e669bd7571f05c81783f99",
     "app/out/main/google_flow_native_transport.cjs": "da661f7c71987b70fdff57fd664803bf5d2ab74b66d01633f19e88572bd2d90b",
     "app/out/preload/index.cjs": "beda24188b3361997dddf3275bdc4483dc89a049cc389c544460cfcdb690e8bc",
     "app/out/renderer/assets/useWorkflowRunner-DGw6Ekx4.js": "3f437eff47f99fb49df39e48e0a549048befd8e2bd7e9d6a90bbf533c7a84304",
@@ -41,6 +41,10 @@
     {
       "at": "2026-11-12T14:43:05.713Z",
       "reason": "Tris duyệt 12/11/2026: API Key ElevenLabs + báo lỗi giọng thư viện; video tham chiếu Veo3 (Omni Flash/Omni 1.2) cho Studio Video, Kịch Bản, workflow; workflow: node Video tham chiếu, cổng video tham chiếu, cổng Frame cuối, Omni 1.2 trong node, giao diện mới"
+    },
+    {
+      "at": "2026-11-12T17:11:20.149Z",
+      "reason": "Tris duyệt 13/11/2026: xóa dấu ✦ Veo bằng tính ngược độ trong suốt (veo_sparkle_remover) chạy trước bộ xóa cũ; workflow ô giây Auto khi có video tham chiếu; hiệu ứng LED node đang chạy"
     }
   ]
 }

@@ -307,3 +307,40 @@
   opacity: 1 !important;
   pointer-events: auto !important;
 }
+
+/* ---------- Node đang chạy: viền LED chạy vòng quanh (hồng → tím → xanh) ---------- */
+@property --wf-led-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes wfLedSpin {
+  to { --wf-led-angle: 360deg; }
+}
+.workflow-react-flow .workflow-node-card.wf-node-running {
+  border-color: transparent !important;
+  box-shadow: 0 0 22px rgba(168, 85, 247, 0.28), 0 10px 30px rgba(0, 0, 0, 0.5) !important;
+}
+.workflow-react-flow .workflow-node-card.wf-node-running::before,
+.workflow-react-flow .workflow-node-card.wf-node-running::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 15px;
+  padding: 3px;
+  background: conic-gradient(from var(--wf-led-angle),
+    #ec4899 0deg, #a855f7 60deg, #3b82f6 120deg, #22d3ee 160deg,
+    transparent 200deg, transparent 290deg, #ec4899 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: wfLedSpin 2.2s linear infinite;
+  pointer-events: none;
+  z-index: 7;
+}
+/* lớp sau: làm nhòe tạo quầng sáng LED */
+.workflow-react-flow .workflow-node-card.wf-node-running::after {
+  filter: blur(7px);
+  opacity: 0.85;
+  z-index: 6;
+}
