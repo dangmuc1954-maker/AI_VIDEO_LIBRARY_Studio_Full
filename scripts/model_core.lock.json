@@ -1,18 +1,34 @@
 {
   "files": {
-    "app/out/main/index.js": "24cb847f07df96ea6acf585d62503230cca5e313fdb70f9e5fbc90552acab9c4",
-    "app/out/main/google_flow_native_transport.cjs": "23b2cb4965596428c03e0ef4d52932663e95e17e9d808926e8db13391500d289",
+    "app/out/main/index.js": "6ecd98bed49e182d120448af6add930de5818871686fa04cf9bd26b48e655ddb",
+    "app/out/main/google_flow_native_transport.cjs": "8d50f4e4c6d423ce72452e654be2f0233c257a66a081772bcc2f1b9e0f7f4e43",
     "app/out/preload/index.cjs": "beda24188b3361997dddf3275bdc4483dc89a049cc389c544460cfcdb690e8bc",
-    "app/out/renderer/assets/useWorkflowRunner-DGw6Ekx4.js": "7e9e69e99a33f927348345a4240097011589b94667640702af69bec4cc0e01d3",
-    "app/out/renderer/assets/VideoStudio-frcr8V6s.js": "d66633a9256d0d3fc0e22df50f9d6b684cfc87b2f1e23b441273d6e4ac090411",
+    "app/out/renderer/assets/useWorkflowRunner-DGw6Ekx4.js": "3c6d9cc19aee43fa93eb15f793df7d0ec6808a6c6a8f918fd60965437d91be03",
+    "app/out/renderer/assets/VideoStudio-frcr8V6s.js": "8ff017c462b7a9c735e9eb7beddf8f2c81336b28e6545c29dd648201423378c3",
     "app/out/renderer/assets/ImageStudio-4nmpUX3j.js": "936636d351a49fa7571dd49519f1df6d6f625b611bb36dcbcc74bbdd52a85af3",
     "app/out/renderer/assets/StudioFailedBulkActions-Zv2NpUPy.js": "f4a9d7d6389f209fbb6b7f6c609a35691d8f17ba7b72b24c4ffb09b818350a82",
-    "app/out/renderer/assets/index-BS7vgKVV.js": "5edddb7a05693059e962ec354e3fb7353a31904cae658cef656571c8aa60c831"
+    "app/out/renderer/assets/index-BS7vgKVV.js": "c53d4bc83e1178017e4dc1187f102f827c6575173e896ad2e5e99e4c6280ebb4"
   },
   "history": [
     {
       "at": "2026-11-09T08:47:56.243Z",
       "reason": "Khởi tạo khóa lõi lần đầu"
+    },
+    {
+      "at": "2026-11-10T17:19:41.459Z",
+      "reason": "Tris yêu cầu 11/11/2026: ElevenLabs Auto bỏ qua tài khoản đang hạ nhiệt (hết quota) và tài khoản job đã thử; lúc chạy ưu tiên tài khoản không hạ nhiệt. Vá kèm TTSStudio truyền elevenSessions cho bảng dòng + khung chi tiết."
+    },
+    {
+      "at": "2026-11-11T06:40:27.903Z",
+      "reason": "Tris yêu cầu 11/11/2026: ElevenLabs đòi captcha thì xoay sang tài khoản ElevenLabs khác thay vì dừng job"
+    },
+    {
+      "at": "2026-11-11T06:44:00.631Z",
+      "reason": "Tris báo lỗi hàng chờ 11/11/2026: cookie ElevenLabs có chữ Đ gây lỗi ByteString — mã hoá header"
+    },
+    {
+      "at": "2026-11-12T02:31:25.919Z",
+      "reason": "Tris duyệt: thêm Omni 1.2 Flash + chọn giọng Flow (+ Khung hình giọng)"
     }
   ]
 }

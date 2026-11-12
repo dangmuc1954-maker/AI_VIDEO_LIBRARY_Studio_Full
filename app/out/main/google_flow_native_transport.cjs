@@ -745,6 +745,10 @@ function buildVideoEnvelope(params, recaptchaToken, rpcConfig) {
       null, null, null, null, null,
       [resolutionCode]
     ];
+    // Giọng Flow (chỉ R2V): ô thứ 8 = [["charon"]]. Không có giọng → giữ nguyên yêu cầu cũ.
+    if (Array.isArray(params.voices) && params.voices.length) {
+      modePayload[7] = params.voices.map(v => [String(v).trim().toLowerCase()]).filter(v => v[0]);
+    }
   } else {
     // T2V
     modePayload = [

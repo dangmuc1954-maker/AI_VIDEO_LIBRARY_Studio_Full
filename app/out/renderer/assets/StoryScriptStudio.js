@@ -105,6 +105,7 @@ const StoryStore = (() => {
           const loadedProjects = parsed.map(p => ({
             ...p,
             isRunning: false,
+            isMerging: false,
             progressText: "",
             waitAllBeforeMerge: p.waitAllBeforeMerge ?? false,
             accountSelections: { muse: "auto", veo3: "auto", grok: "auto", ...(p.accountSelections || {}) },
@@ -160,6 +161,184 @@ const StoryStore = (() => {
 
 // Theo dõi dự án đang chạy — Set module-level, không bị reset khi component unmount/remount
 const runningProjects = new Set();
+// Dây chuyền còn "sống" (kể cả lúc đang dừng dần), cảnh cần chạy lại sau khi dừng, job đang chạy, dự án đang ghép
+const storyLoopAlive = new Set();
+const storyPendingRestart = new Map();
+const storyActiveJob = new Map();
+const storyMerging = new Set();
+// Dự án được yêu cầu tạm dừng: cảnh đang tạo vẫn chạy xong, dây chuyền dừng trước cảnh kế tiếp
+const storyPauseRequested = new Set();
+const STORY_RESTART_FROM_START = "__from_start__";
+const STORY_RESET_ONLY = "__reset_only__";
+
+// Tạm dừng: không hủy cảnh đang tạo, chỉ không gửi cảnh kế tiếp → sửa / thêm prompt thoải mái
+function pauseStoryProject(projId) {
+  if (!storyLoopAlive.has(projId)) return;
+  storyPauseRequested.add(projId);
+  StoryStore.updateProject(projId, { isPaused: true });
+  toast.info("⏸️ Đã tạm dừng: cảnh đang tạo sẽ chạy xong rồi dừng. Sửa / thêm prompt xong bấm \"Tiếp tục\".");
+}
+
+// Tiếp tục: nhận thông tin mới nhất của các cảnh chưa tạo rồi chạy tiếp, nối frame cuối cảnh trước
+function resumeStoryProject(projId) {
+  const proj = StoryStore.getState().projects.find(p => p.id === projId);
+  if (!proj) return;
+  if (storyLoopAlive.has(projId)) {
+    // Cảnh cũ chưa xong → bỏ lệnh dừng, dây chuyền chạy tiếp bình thường
+    storyPauseRequested.delete(projId);
+    StoryStore.updateProject(projId, { isPaused: false });
+    toast.info("▶️ Tiếp tục dây chuyền.");
+    return;
+  }
+  const live = getLiveScenes(projId);
+  const at = live.find(s => s.id === proj.pausedAtSceneId && s.status !== "Completed")
+    || live.find(s => s.status !== "Completed");
+  if (!at) {
+    StoryStore.updateProject(projId, { isPaused: false, pausedAtSceneId: null });
+    toast.info("Tất cả cảnh đã tạo xong — không còn cảnh nào để tiếp tục.");
+    return;
+  }
+  runStoryProjectCore(projId, { resumeFromSceneId: at.id, continueMode: true });
+}
+
+// Đặt lại: dừng dây chuyền, xóa hết video của dự án (giữ prompt, ảnh tham chiếu, cài đặt). KHÔNG tự chạy — bấm TẠO VIDEO khi muốn
+function resetStoryProject(projId) {
+  const proj = StoryStore.getState().projects.find(p => p.id === projId);
+  if (!proj) return;
+  const vidCount = (proj.completedVideos || []).length;
+  if (!window.confirm(`Đặt lại dự án "${proj.name}": dừng dây chuyền và xóa ${vidCount} video đã tạo khỏi dự án (prompt, ảnh tham chiếu và cài đặt giữ nguyên)?`)) return;
+  const now = Date.now();
+  storyPauseRequested.delete(projId);
+  StoryStore.updateProject(projId, p => ({
+    ...p,
+    isPaused: false,
+    pausedAtSceneId: null,
+    completedMovie: null,
+    completedVideos: [],
+    chainFrameAssetId: null,
+    chainFrameUrl: "",
+    sceneResetAt: { ...(p.sceneResetAt || {}), ...Object.fromEntries((p.prompts || []).map(s => [s.index, now])) },
+    prompts: (p.prompts || []).map(s => ({
+      ...s, status: "Pending", progress: 0, videoUrl: "", assetId: null, error: "",
+      lastExtractedFrameUrl: "", lastExtractedFrameAssetId: null
+    }))
+  }));
+  if (storyLoopAlive.has(projId)) {
+    storyPendingRestart.set(projId, STORY_RESET_ONLY);
+    runningProjects.delete(projId);
+    const activeJobId = storyActiveJob.get(projId);
+    const queueApi = window.aiforge?.queue || window.aivideo?.queue;
+    if (activeJobId) {
+      Promise.resolve(queueApi?.cancelJobs?.([activeJobId])).catch(err => console.warn("Không hủy được job cũ:", err));
+    }
+    toast.info("🔁 Đã đặt lại dự án — đang dừng dây chuyền. Bấm \"TẠO VIDEO KỊCH BẢN\" khi muốn chạy lại.");
+  } else {
+    StoryStore.updateProject(projId, { isRunning: false, progressText: "" });
+    toast.info("🔁 Đã đặt lại dự án. Bấm \"TẠO VIDEO KỊCH BẢN\" khi muốn chạy lại.");
+  }
+}
+
+// Danh sách cảnh có prompt, đọc MỚI từ store (prompt thêm trong lúc chạy vẫn được nối vào dây chuyền)
+function getLiveScenes(projId) {
+  const p = StoryStore.getState().projects.find(x => x.id === projId);
+  return (p?.prompts || []).filter(s => s.prompt && s.prompt.trim().length > 0);
+}
+
+// Tạo lại từ 1 cảnh: xóa video từ cảnh đó trở xuống khỏi dự án (giữ prompt), rồi chạy lại từ frame cuối cảnh liền trước
+function regenerateStoryScene(projId, sceneId) {
+  const proj = StoryStore.getState().projects.find(p => p.id === projId);
+  if (!proj) return;
+  const k = proj.prompts.findIndex(s => s.id === sceneId);
+  if (k < 0) return;
+  const tail = proj.prompts.slice(k);
+  const tailIdx = new Set(tail.map(s => s.index));
+  const vidsBelow = (proj.completedVideos || []).filter(v => tailIdx.has(v.sceneNum)).length;
+  if (vidsBelow > 0 && !window.confirm(`Tạo lại Cảnh ${proj.prompts[k].index}: xóa ${vidsBelow} video từ Cảnh ${proj.prompts[k].index} trở xuống khỏi dự án (prompt giữ nguyên) rồi chạy lại từ đây?`)) return;
+
+  const now = Date.now();
+  StoryStore.updateProject(projId, p => ({
+    ...p,
+    completedMovie: null,
+    completedVideos: (p.completedVideos || []).filter(v => !tailIdx.has(v.sceneNum)),
+    sceneResetAt: { ...(p.sceneResetAt || {}), ...Object.fromEntries([...tailIdx].map(i => [i, now])) },
+    prompts: p.prompts.map((s, j) => j < k ? s : {
+      ...s, status: "Pending", progress: 0, videoUrl: "", assetId: null, error: "",
+      ...(j > k ? { lastExtractedFrameUrl: "", lastExtractedFrameAssetId: null } : {})
+    })
+  }));
+
+  if (storyLoopAlive.has(projId)) {
+    // Đang chạy: dừng dây chuyền hiện tại, hủy job đang tạo, chạy lại từ cảnh sớm nhất được yêu cầu
+    const cur = storyPendingRestart.get(projId);
+    const curPos = cur ? proj.prompts.findIndex(s => s.id === cur) : -1;
+    if (curPos < 0 || k < curPos) storyPendingRestart.set(projId, sceneId);
+    runningProjects.delete(projId);
+    const activeJobId = storyActiveJob.get(projId);
+    const queueApi = window.aiforge?.queue || window.aivideo?.queue;
+    if (activeJobId) {
+      Promise.resolve(queueApi?.cancelJobs?.([activeJobId])).catch(err => console.warn("Không hủy được job cũ:", err));
+    }
+    toast.info(`🔄 Đang dừng dây chuyền để tạo lại từ Cảnh ${proj.prompts[k].index}...`);
+  } else {
+    runStoryProjectCore(projId, { resumeFromSceneId: sceneId });
+  }
+}
+
+// Ghép phim bằng tay: ghép video đã xong của đúng dự án này, theo thứ tự cảnh
+async function mergeStoryProject(projId) {
+  const updateProject = StoryStore.updateProject;
+  const proj = StoryStore.getState().projects.find(p => p.id === projId);
+  if (!proj) return;
+  if (storyMerging.has(projId)) { toast.info("Dự án này đang ghép phim, vui lòng chờ..."); return; }
+
+  const byScene = new Map();
+  [...(proj.completedVideos || [])]
+    .sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")))
+    .forEach(v => { if (v && v.id) byScene.set(v.sceneNum, v); });
+  const vids = [...byScene.values()].sort((a, b) => a.sceneNum - b.sceneNum);
+  if (vids.length < 2) { toast.warning("Cần ít nhất 2 video hoàn tất để ghép phim!"); return; }
+
+  const assetsApi = window.aiforge?.assets || window.aivideo?.assets;
+  storyMerging.add(projId);
+  updateProject(projId, { isMerging: true });
+  toast.info(`🎞️ [${proj.name}] Đang ghép ${vids.length} phân cảnh thành phim dài...`);
+  try {
+    const videoIdsToMerge = vids.map(v => v.id);
+    const safeName = `Phim_${proj.name.replace(/\s+/g, "_")}_${Date.now()}.mp4`;
+    const opts = {
+      name: safeName,
+      outputAspect: proj.prompts[0]?.ratio || "16:9",
+      exportDirectory: proj.saveDirectory || "",
+      waitAllBeforeMerge: proj.waitAllBeforeMerge ?? false
+    };
+    let mergedRes = null;
+    if (assetsApi?.editAndMergeVideos) {
+      mergedRes = await assetsApi.editAndMergeVideos(videoIdsToMerge.map(id => ({ assetId: id, startTime: 0 })), proj.transition || "fade", opts);
+    } else if (assetsApi?.mergeVideos) {
+      mergedRes = await assetsApi.mergeVideos(videoIdsToMerge, proj.transition || "fade", opts);
+    } else {
+      throw new Error("Không tìm thấy chức năng ghép video");
+    }
+    if (!mergedRes) throw new Error("Ghép phim không trả về kết quả");
+    updateProject(projId, p => ({
+      ...p,
+      completedMovie: {
+        id: mergedRes.id,
+        name: safeName,
+        videoUrl: mergedRes.url || mergedRes.videoUrl || "",
+        localPath: mergedRes.localPath || "",
+        duration: mergedRes.duration || "N/A"
+      }
+    }));
+    toast.success(`🎬 [${proj.name}] Ghép phim hoàn chỉnh thành công!`);
+  } catch (mErr) {
+    console.error("Lỗi ghép phim:", mErr);
+    toast.error("Lỗi ghép phim: " + (mErr?.message || mErr));
+  } finally {
+    storyMerging.delete(projId);
+    updateProject(projId, { isMerging: false });
+  }
+}
 
 // ==========================================================================
 // DÂY CHUYỀN CHẠY DỰ ÁN — module-level, KHÔNG phụ thuộc component đang mount.
@@ -171,7 +350,7 @@ const runningProjects = new Set();
 //            Trống ảnh tham chiếu -> [Frame cuối cảnh trước].
 // ==========================================================================
 async function runStoryProjectCore(projId, options = {}) {
-  const { resumeFromSceneId = null } = options;
+  const { resumeFromSceneId = null, continueMode = false } = options;
   const updateProject = StoryStore.updateProject;
   const runningRef = { current: runningProjects };
 
@@ -196,15 +375,21 @@ async function runStoryProjectCore(projId, options = {}) {
   }
 
   runningRef.current.add(projId);
+  storyLoopAlive.add(projId);
+  storyPauseRequested.delete(projId);
   updateProject(projId, p => ({
     ...p,
     isRunning: true,
-    progressText: resumeFromSceneId ? "Đang tạo lại cảnh lỗi..." : "Khởi tạo dây chuyền...",
+    isPaused: false,
+    pausedAtSceneId: null,
+    progressText: continueMode ? "Đang tiếp tục dây chuyền..." : (resumeFromSceneId ? "Đang tạo lại cảnh lỗi..." : "Khởi tạo dây chuyền..."),
     prompts: resumeFromSceneId
       ? p.prompts.map(s => s.id === resumeFromSceneId ? { ...s, status: "Running", progress: 10, error: "" } : s)
       : p.prompts
   }));
-  toast.info(resumeFromSceneId
+  toast.info(continueMode
+    ? `▶️ [${proj.name}] Tiếp tục dây chuyền từ Cảnh ${validPrompts[startIndex]?.index} với thông tin mới nhất...`
+    : resumeFromSceneId
     ? `🔄 [${proj.name}] Đang tạo lại Cảnh ${validPrompts[startIndex]?.index}, dây chuyền sẽ tự động tiếp tục...`
     : `🎬 [${proj.name}] Bắt đầu chạy Chuỗi Kịch Bản (${validPrompts.length} cảnh)...`);
 
@@ -234,25 +419,55 @@ async function runStoryProjectCore(projId, options = {}) {
     chainGrokAccount = (sel.grok && sel.grok !== "auto" && grokAccounts.find(s => s.accountId === sel.grok)) || grokAccounts[0] || null;
   } catch (_) {}
 
-  // Nếu tạo lại giữa chừng (resume), khôi phục frame nối cảnh đã lưu từ cảnh liền trước
-  let lastExtractedFrameAsset = (startIndex > 0 && proj.chainFrameAssetId)
-    ? { id: proj.chainFrameAssetId, url: proj.chainFrameUrl }
-    : null;
   const newCompletedVideos = [];
 
   try {
-    for (let i = startIndex; i < validPrompts.length; i++) {
+    // Tạo lại giữa chừng: lấy frame cuối của ĐÚNG cảnh liền trước (trích lại từ video cảnh đó),
+    // dự phòng frame đã lưu trên cảnh, rồi mới tới frame nối gần nhất của dự án (cách cũ).
+    let lastExtractedFrameAsset = null;
+    if (startIndex > 0) {
+      const targetScene = validPrompts[startIndex];
+      const prevScene = validPrompts[startIndex - 1];
+      if (prevScene?.assetId) {
+        try {
+          updateProject(projId, { progressText: `Đang lấy frame cuối Cảnh ${prevScene.index}...` });
+          const ex = await assetsApi?.extractLastFrame?.({ assetId: prevScene.assetId, promptOrder: prevScene.index });
+          if (ex?.id) lastExtractedFrameAsset = ex;
+        } catch (fErr) {
+          console.warn("Không trích lại được frame cảnh trước:", fErr);
+        }
+      }
+      if (!lastExtractedFrameAsset && targetScene?.lastExtractedFrameAssetId) {
+        lastExtractedFrameAsset = { id: targetScene.lastExtractedFrameAssetId, url: targetScene.lastExtractedFrameUrl || "" };
+      }
+      if (!lastExtractedFrameAsset && proj.chainFrameAssetId) {
+        lastExtractedFrameAsset = { id: proj.chainFrameAssetId, url: proj.chainFrameUrl };
+      }
+      if (!lastExtractedFrameAsset) {
+        toast.warning(`Không lấy được frame cuối Cảnh ${prevScene?.index} — Cảnh ${targetScene?.index} sẽ chạy với ảnh tham chiếu riêng.`);
+      }
+    }
+
+    // Đi theo id cảnh, đọc danh sách MỚI mỗi lượt → prompt thêm trong lúc chạy được nối tiếp vào dây chuyền
+    let curSceneId = validPrompts[startIndex]?.id || null;
+    let doneCount = 0;
+    let pausedAtId = null;
+    while (curSceneId) {
       if (!runningRef.current.has(projId)) {
         throw new Error("Người dùng đã dừng tiến trình chạy kịch bản.");
       }
+      if (storyPauseRequested.has(projId)) { pausedAtId = curSceneId; break; }
 
-      const curScene = validPrompts[i];
+      const liveList = getLiveScenes(projId);
+      const i = liveList.findIndex(s => s.id === curSceneId);
+      if (i < 0) break;
+      const curScene = liveList[i];
       const sceneNum = curScene.index || (i + 1);
 
       updateProject(projId, p => ({
         ...p,
         activeSceneIndex: sceneNum,
-        progressText: `Đang render Cảnh ${sceneNum}/${validPrompts.length}...`,
+        progressText: `Đang render Cảnh ${sceneNum}/${liveList.length}...`,
         prompts: p.prompts.map(s => s.id === curScene.id ? { ...s, status: "Running", progress: 10, error: "" } : s)
       }));
 
@@ -286,6 +501,7 @@ async function runStoryProjectCore(projId, options = {}) {
       const isGrok = (curScene.provider || "").toLowerCase().includes("grok");
       const providerId = isGrok ? "grok" : (isMuse ? "muse" : "veo3");
 
+      const liveProj = StoryStore.getState().projects.find(p => p.id === projId) || proj;
       const targetAccount = isMuse ? chainMuseAccount : (isGrok ? chainGrokAccount : chainVeoAccount);
       const singleJobRunId = `story-run-${projId}-${sceneNum}-${Date.now()}`;
 
@@ -317,10 +533,11 @@ async function runStoryProjectCore(projId, options = {}) {
           account: targetAccount ? (targetAccount.accountName || targetAccount.displayName || "Auto") : "Auto",
           accountSelection: targetAccount ? "manual" : "auto",
           referenceAssetIds: refIds,
+          ...(!isMuse && !isGrok && liveProj.flowVoice && refIds.length > 0 ? { voice: liveProj.flowVoice } : {}),
           preset: "custom",
           studioSource: "story-script-studio",
           autoMerge: false,
-          autoDownload: proj.autoDownload ?? true
+          autoDownload: liveProj.autoDownload ?? true
         }
       }];
 
@@ -331,13 +548,15 @@ async function runStoryProjectCore(projId, options = {}) {
       if (!jobId) {
         throw new Error("Không thể khởi tạo hàng đợi cho Cảnh " + sceneNum);
       }
+      storyActiveJob.set(projId, jobId);
 
       // Chờ job hoàn tất bằng onChanged event (giống useWorkflowRunner) + fallback poll
       const findJobInPayload = (payload) => {
         if (!payload) return null;
         const jobs = Array.isArray(payload) ? payload : (payload.jobs || payload.state?.jobs || []);
-        return jobs.find(x => x && (x.id === jobId || x.jobId === jobId ||
-          x.payload?.promptId === curScene.id || x.promptId === curScene.id)) || null;
+        // Chỉ nhận đúng job vừa gửi (theo jobId). Không khớp theo promptId: bấm "Tạo lại" thì
+        // job cũ cùng cảnh vẫn nằm trong hàng đợi và sẽ bị nhận nhầm video cũ.
+        return jobs.find(x => x && (x.id === jobId || x.jobId === jobId)) || null;
       };
 
       const completedJob = await new Promise((resolve, reject) => {
@@ -402,6 +621,12 @@ async function runStoryProjectCore(projId, options = {}) {
         }, 900000);
       });
 
+      storyActiveJob.delete(projId);
+      // Bị dừng / bấm tạo lại trong lúc chờ → không ghi kết quả cũ đè lên cảnh đã được đặt lại
+      if (!runningRef.current.has(projId)) {
+        throw new Error("Người dùng đã dừng tiến trình chạy kịch bản.");
+      }
+
       const videoAsset = (completedJob.result?.assets || []).find(a => a.type === "video") || null;
       const resultVideoAssetId = videoAsset?.assetId || videoAsset?.id || completedJob.result?.assetId || completedJob.assetId || completedJob.payload?.assetId || jobId;
       let resultVideoUrl = videoAsset?.url || completedJob.result?.videoUrl || completedJob.videoUrl || "";
@@ -453,94 +678,54 @@ async function runStoryProjectCore(projId, options = {}) {
 
       toast.success(`🎉 [${proj.name}] Cảnh ${sceneNum} hoàn tất xuất sắc!`);
 
-      // Trích xuất Frame cuối để nạp sang Cảnh tiếp theo — lưu vào project để sống sót qua retry/unmount
-      if (i < validPrompts.length - 1) {
-        try {
-          updateProject(projId, { progressText: `Đang trích xuất frame cuối Cảnh ${sceneNum}...` });
-          const extracted = await assetsApi?.extractLastFrame?.({
-            assetId: resultVideoAssetId,
-            jobId: jobId,
-            promptOrder: sceneNum
-          });
-          if (extracted?.id) {
-            lastExtractedFrameAsset = extracted;
-            const nextScene = validPrompts[i + 1];
-            updateProject(projId, p => ({
-              ...p,
-              chainFrameAssetId: extracted.id,
-              chainFrameUrl: extracted.url || extracted.thumbnailUrl || "",
-              prompts: nextScene
-                ? p.prompts.map(s => s.id === nextScene.id ? { ...s, lastExtractedFrameUrl: extracted.url || extracted.thumbnailUrl || "" } : s)
-                : p.prompts
-            }));
-            toast.success(`✨ Đã sẵn sàng Frame cuối Cảnh ${sceneNum} nối tiếp sang Cảnh ${sceneNum + 1}!`);
-          }
-        } catch (fErr) {
-          console.warn("Không trích xuất được frame:", fErr);
-        }
-      }
-    }
-
-    toast.success(`🏆 [XUẤT SẮC] Đã hoàn thành toàn bộ ${validPrompts.length} cảnh của ${proj.name}!`);
-
-    // TỰ ĐỘNG GHÉP PHIM NẾU CÓ BẬT AUTO-MERGE
-    if (proj.autoMerge && newCompletedVideos.length > 1) {
-      updateProject(projId, { progressText: "Đang tự động ghép phim dài hoàn chỉnh..." });
-      toast.info(`🎞️ [${proj.name}] Đang ghép ${newCompletedVideos.length} phân cảnh thành phim dài...`);
-
+      // Trích xuất Frame cuối để nạp sang Cảnh tiếp theo — luôn trích (prompt có thể được thêm sau),
+      // lưu cả id frame lên cảnh kế tiếp để bấm "Tạo lại" dùng đúng frame
       try {
-        const videoIdsToMerge = newCompletedVideos.map(v => v.id).filter(Boolean);
-        const safeName = `Phim_${proj.name.replace(/\s+/g, "_")}_${Date.now()}.mp4`;
-
-        let mergedRes = null;
-        if (assetsApi?.editAndMergeVideos) {
-          mergedRes = await assetsApi.editAndMergeVideos(
-            videoIdsToMerge.map(id => ({ assetId: id, startTime: 0 })),
-            proj.transition || "fade",
-            {
-              name: safeName,
-              outputAspect: proj.prompts[0]?.ratio || "16:9",
-              exportDirectory: proj.saveDirectory || "",
-              waitAllBeforeMerge: proj.waitAllBeforeMerge ?? false
-            }
-          );
-        } else if (assetsApi?.mergeVideos) {
-          mergedRes = await assetsApi.mergeVideos(
-            videoIdsToMerge,
-            proj.transition || "fade",
-            {
-              name: safeName,
-              outputAspect: proj.prompts[0]?.ratio || "16:9",
-              exportDirectory: proj.saveDirectory || "",
-              waitAllBeforeMerge: proj.waitAllBeforeMerge ?? false
-            }
-          );
-        }
-
-        if (mergedRes) {
+        updateProject(projId, { progressText: `Đang trích xuất frame cuối Cảnh ${sceneNum}...` });
+        const extracted = await assetsApi?.extractLastFrame?.({
+          assetId: resultVideoAssetId,
+          jobId: jobId,
+          promptOrder: sceneNum
+        });
+        if (extracted?.id) {
+          lastExtractedFrameAsset = extracted;
+          const afterList = getLiveScenes(projId);
+          const nextScene = afterList[afterList.findIndex(s => s.id === curScene.id) + 1];
+          const frameUrl = extracted.url || extracted.thumbnailUrl || "";
           updateProject(projId, p => ({
             ...p,
-            completedMovie: {
-              id: mergedRes.id,
-              name: safeName,
-              videoUrl: mergedRes.url || mergedRes.videoUrl || "",
-              localPath: mergedRes.localPath || "",
-              duration: mergedRes.duration || "N/A"
-            }
+            chainFrameAssetId: extracted.id,
+            chainFrameUrl: frameUrl,
+            prompts: nextScene
+              ? p.prompts.map(s => s.id === nextScene.id ? { ...s, lastExtractedFrameUrl: frameUrl, lastExtractedFrameAssetId: extracted.id } : s)
+              : p.prompts
           }));
-          toast.success(`🎬 [${proj.name}] Ghép phim hoàn chỉnh thành công!`);
+          if (nextScene) toast.success(`✨ Đã sẵn sàng Frame cuối Cảnh ${sceneNum} nối tiếp sang Cảnh ${nextScene.index}!`);
         }
-      } catch (mErr) {
-        console.warn("Lỗi tự động ghép phim:", mErr);
-        toast.warning("Lỗi tự động ghép phim: " + mErr.message);
+      } catch (fErr) {
+        console.warn("Không trích xuất được frame:", fErr);
       }
+
+      doneCount++;
+      // Cảnh kế tiếp lấy từ danh sách MỚI NHẤT (kể cả prompt vừa thêm trong lúc chạy)
+      const nextList = getLiveScenes(projId);
+      const pos = nextList.findIndex(s => s.id === curScene.id);
+      curSceneId = pos >= 0 ? (nextList[pos + 1]?.id || null) : null;
+    }
+
+    if (pausedAtId) {
+      const pausedScene = getLiveScenes(projId).find(s => s.id === pausedAtId);
+      updateProject(projId, { isPaused: true, pausedAtSceneId: pausedAtId });
+      toast.info(`⏸️ [${proj.name}] Đã dừng trước Cảnh ${pausedScene?.index ?? ""}. Sửa / thêm prompt rồi bấm "Tiếp tục".`);
+    } else {
+      toast.success(`🏆 [XUẤT SẮC] Đã hoàn thành ${doneCount} cảnh của ${proj.name}! Bấm "Ghép Phim" khi muốn ghép.`);
     }
 
   } catch (err) {
     const errMsg = err?.message || String(err);
     const isUserStop = errMsg.includes("dừng");
     if (isUserStop) {
-      toast.info(`⏸️ [${proj.name}] Đã tạm dừng dây chuyền.`);
+      if (!storyPendingRestart.has(projId)) toast.info(`⏸️ [${proj.name}] Đã tạm dừng dây chuyền.`);
     } else {
       // KHÔNG dừng hẳn toàn bộ dự án — chuyển cảnh lỗi sang trạng thái CHỜ TẠO LẠI,
       // giữ nguyên toàn bộ cảnh đã hoàn tất để người dùng bấm "Tạo lại" tiếp tục dây chuyền.
@@ -553,7 +738,18 @@ async function runStoryProjectCore(projId, options = {}) {
     }
   } finally {
     runningRef.current.delete(projId);
-    updateProject(projId, { isRunning: false, progressText: "" });
+    storyLoopAlive.delete(projId);
+    storyActiveJob.delete(projId);
+    storyPauseRequested.delete(projId);
+    updateProject(projId, p => ({ ...p, isRunning: false, progressText: "", isPaused: !!(p.isPaused && p.pausedAtSceneId) }));
+    // Bấm "Tạo lại" trong lúc đang chạy → chạy lại từ cảnh đó sau khi dây chuyền cũ dừng hẳn
+    const restartId = storyPendingRestart.get(projId);
+    if (restartId) {
+      storyPendingRestart.delete(projId);
+      if (restartId !== STORY_RESET_ONLY) setTimeout(() => restartId === STORY_RESTART_FROM_START
+        ? runStoryProjectCore(projId)
+        : runStoryProjectCore(projId, { resumeFromSceneId: restartId }), 300);
+    }
   }
 }
 
@@ -764,11 +960,26 @@ export default function StoryScriptStudio() {
 
     if (rawLines.length === 0) return;
 
+    // Luôn NỐI THÊM sau các prompt cũ (có 20 cảnh → cảnh mới bắt đầu từ 21). Đang chạy thì dây chuyền chạy tiếp luôn.
+    // Chỉ thay mới khi dự án chưa có prompt thật (toàn cảnh mẫu mặc định / cảnh trống chưa có video).
+    const isRunningNow = !!currentProject.isRunning || storyLoopAlive.has(currentProject.id);
+    const samplePrompts = new Set(createDefaultProject(1).prompts.map(s => s.prompt));
+    const isPlaceholder = s => !s.videoUrl && !s.assetId && (s.status || "Pending") === "Pending"
+      && !(s.referenceAssetIds || []).length
+      && (!(s.prompt || "").trim() || samplePrompts.has(s.prompt));
+    const appendMode = isRunningNow || currentProject.prompts.some(s => !isPlaceholder(s));
+    // Bỏ các cảnh trống ở cuối danh sách (bấm "Thêm cảnh" mà chưa gõ) để cảnh mới nối liền
+    const keptScenes = [...currentProject.prompts];
+    if (!isRunningNow) {
+      while (keptScenes.length && !(keptScenes[keptScenes.length - 1].prompt || "").trim() && isPlaceholder(keptScenes[keptScenes.length - 1])) keptScenes.pop();
+    }
+    const baseIndex = appendMode ? keptScenes.reduce((m, s) => Math.max(m, s.index || 0), 0) : 0;
+
     const newScenes = rawLines.map((line, idx) => {
       const cleaned = line.replace(/^(cảnh|phân cảnh|scene)\s*\d+[:.-]?\s*/i, "").trim();
       return {
         id: generateId("sc"),
-        index: idx + 1,
+        index: baseIndex + idx + 1,
         prompt: cleaned || line,
         provider: currentProject.prompts[0]?.provider || "Muse AI",
         model: currentProject.prompts[0]?.model || "muse-video",
@@ -786,14 +997,25 @@ export default function StoryScriptStudio() {
       };
     });
 
-    updateProject(currentProject.id, p => ({
-      ...p,
-      prompts: newScenes
-    }));
+    const keptIds = new Set(keptScenes.map(s => s.id));
+    updateProject(currentProject.id, p => {
+      const kept = isRunningNow ? p.prompts : p.prompts.filter(s => keptIds.has(s.id));
+      const start = kept.reduce((m, s) => Math.max(m, s.index || 0), 0);
+      return {
+        ...p,
+        prompts: appendMode
+          ? [...kept, ...newScenes.map((s, idx) => ({ ...s, index: start + idx + 1 }))]
+          : newScenes
+      };
+    });
 
     setIsBulkImportOpen(false);
     setBulkPromptText("");
-    toast.success(`🎉 Đã nhập thành công ${newScenes.length} phân cảnh cho dự án!`);
+    toast.success(isRunningNow
+      ? `🔗 Đã nối thêm ${newScenes.length} cảnh vào dây chuyền đang chạy — sẽ tiếp tục từ frame cuối cảnh trước!`
+      : appendMode
+      ? `📥 Đã thêm ${newScenes.length} cảnh nối tiếp (Cảnh ${baseIndex + 1} → ${baseIndex + newScenes.length}), prompt cũ giữ nguyên.`
+      : `🎉 Đã nhập thành công ${newScenes.length} phân cảnh cho dự án!`);
   };
 
   // Chọn thư mục lưu cho dự án
@@ -935,6 +1157,9 @@ export default function StoryScriptStudio() {
           for (const j of matchedJobs) {
             const m = j.title?.match(/Cảnh\s+(\d+)/i) || (j.payload?.promptOrder ? ["", j.payload.promptOrder] : null);
             const sceneNum = m ? parseInt(m[1], 10) : 1;
+            // Cảnh đã bấm "Tạo lại": bỏ qua video cũ tạo trước lúc đặt lại
+            const resetAt = currentProject.sceneResetAt?.[sceneNum];
+            if (resetAt && new Date(j.createdAt || 0).getTime() <= resetAt) continue;
             const videoAsset = (j.result?.assets || []).find(a => a.type === "video") || null;
             const assetId = videoAsset?.assetId || videoAsset?.id || j.result?.assetId || j.assetId || j.id;
             const videoUrl = videoAsset?.url || j.result?.videoUrl || (assetId ? `aivideo-asset://asset/${assetId}` : "");
@@ -979,10 +1204,10 @@ export default function StoryScriptStudio() {
   // Chạy dự án — logic thực tế nằm ở module-level runStoryProjectCore (sống độc lập component)
   const handleRunProject = runStoryProjectCore;
 
-  // Tạo lại 1 cảnh bị lỗi — dây chuyền sẽ tự động tiếp tục các cảnh sau đó
+  // Tạo lại 1 cảnh (lỗi hay đã xong): xóa video từ cảnh đó trở xuống, chạy lại từ frame cuối cảnh liền trước
   const handleRetryScene = (sceneId) => {
     if (!currentProject) return;
-    runStoryProjectCore(currentProject.id, { resumeFromSceneId: sceneId });
+    regenerateStoryScene(currentProject.id, sceneId);
   };
 
   const handleOpenFolder = (localPath) => {
@@ -1097,11 +1322,13 @@ export default function StoryScriptStudio() {
     // BODY: NỘI DUNG DỰ ÁN HIỆN TẠI (STORYBOARD & CONTROLS)
     // ========================================================================
     currentProject && React.createElement("div", {
-      className: "flex-1 flex flex-col min-h-0 overflow-y-auto px-5 py-4 gap-4"
+      className: "flex-1 flex flex-col min-h-0 px-5 gap-4",
+      style: { paddingTop: 16 }
     },
-      // THANH CÔNG CỤ DỰ ÁN
+      // THANH CÔNG CỤ DỰ ÁN — cố định ở trên khi lăn chuột
       React.createElement("div", {
-        className: "flex flex-wrap items-center justify-between gap-3 bg-[#131B2B] p-3 rounded-xl border border-white/[0.08]"
+        className: "flex flex-wrap items-center justify-between gap-3 bg-[#131B2B] p-3 rounded-xl border border-white/[0.08]",
+        style: { flexShrink: 0, background: "#131B2B", zIndex: 30, boxShadow: "0 8px 18px rgba(0,0,0,0.45)" }
       },
         React.createElement("div", { className: "flex flex-wrap items-center gap-2" },
           // Nút nhập hàng loạt prompt
@@ -1126,17 +1353,21 @@ export default function StoryScriptStudio() {
             className: "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 text-xs font-semibold cursor-pointer transition-all"
           }, "🗑️ Dọn Cảnh"),
 
-          // Toggles Tự động ghép
+          // Nút Ghép Phim (bấm mới ghép) — ghép video đã xong của đúng dự án này, theo thứ tự cảnh
           React.createElement("button", {
-            onClick: () => updateProject(currentProject.id, p => ({ ...p, autoMerge: !p.autoMerge })),
-            className: `inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer transition-all ${
-              currentProject.autoMerge
-                ? "border-cyan-400 bg-cyan-500/20 text-cyan-200 shadow-[0_0_12px_rgba(6,182,212,0.25)]"
-                : "border-white/10 bg-white/5 text-slate-400"
+            onClick: () => mergeStoryProject(currentProject.id),
+            disabled: !!currentProject.isMerging,
+            title: "Ghép các video đã hoàn tất của dự án này thành 1 phim (theo thứ tự cảnh, dùng hiệu ứng chuyển cảnh đang chọn)",
+            className: `inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+              currentProject.isMerging
+                ? "border-cyan-400/40 bg-cyan-500/10 text-cyan-300 cursor-wait animate-pulse"
+                : "border-cyan-400 bg-cyan-500/20 text-cyan-200 hover:bg-cyan-500/30 cursor-pointer shadow-[0_0_12px_rgba(6,182,212,0.25)]"
             }`
           },
-            React.createElement("span", { className: `w-2 h-2 rounded-full ${currentProject.autoMerge ? "bg-cyan-400 animate-pulse" : "bg-slate-500"}` }),
-            currentProject.autoMerge ? "🔗 Tự Động Ghép Phim: BẬT" : "🔗 Ghép Phim: TẮT"
+            currentProject.isMerging ? "⏳ Đang ghép phim..." : "🔗 Ghép Phim",
+            !currentProject.isMerging && React.createElement("span", {
+              className: "bg-white/15 text-white px-1.5 py-0.5 rounded text-[10px]"
+            }, `${new Set((currentProject.completedVideos || []).map(v => v.sceneNum)).size} clip`)
           ),
 
           // Toggle Tự động tải
@@ -1152,8 +1383,8 @@ export default function StoryScriptStudio() {
             "⚡ Tự Động Tải: ", currentProject.autoDownload ? "BẬT" : "TẮT"
           ),
 
-          // Toggle Chờ xong hết mới ghép (chỉ hiện khi autoMerge bật)
-          currentProject.autoMerge && React.createElement("button", {
+          // Toggle Chờ xong hết mới ghép
+          React.createElement("button", {
             onClick: () => updateProject(currentProject.id, p => ({ ...p, waitAllBeforeMerge: !p.waitAllBeforeMerge })),
             className: `inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold cursor-pointer transition-all ${
               currentProject.waitAllBeforeMerge
@@ -1162,22 +1393,70 @@ export default function StoryScriptStudio() {
             }`
           }, currentProject.waitAllBeforeMerge ? "✂ Chờ Xong Hết Mới Ghép" : "✂ Chờ xong hết mới ghép"),
 
-          // Dropdown Chuyển cảnh (chỉ hiện khi autoMerge bật)
-          currentProject.autoMerge && React.createElement("div", { className: "flex items-center gap-1.5" },
+          // Giọng Flow (Veo3): một giọng cho cả dự án, chỉ áp cho cảnh có ảnh tham chiếu
+          React.createElement("div", { className: "flex items-center gap-1.5", title: "Giọng Flow cho cảnh Veo3: chỉ áp dụng khi cảnh có ảnh tham chiếu. Nên dùng Omni 1.2 Flash. Để trống = Flow tự chọn giọng như cũ." },
+            React.createElement("span", { className: "text-xs text-slate-400 font-semibold whitespace-nowrap" }, "🎙️ Giọng Flow:"),
+            React.createElement("select", {
+              value: currentProject.flowVoice || "",
+              onChange: e => updateProject(currentProject.id, { flowVoice: e.target.value }),
+              className: "bg-[#0B0F17] text-sky-200 text-xs border border-sky-500/30 rounded-lg px-2 py-1.5 outline-none cursor-pointer font-semibold"
+            },
+              React.createElement("option", { key: "none", value: "", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Tự động (như cũ)"),
+              React.createElement("option", { key: "achernar", value: "achernar", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Achernar — Nữ, mềm, cao"),
+              React.createElement("option", { key: "achird", value: "achird", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Achird — Nam, thân thiện"),
+              React.createElement("option", { key: "algenib", value: "algenib", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Algenib — Nam, khàn, trầm"),
+              React.createElement("option", { key: "algieba", value: "algieba", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Algieba — Nam, thoải mái"),
+              React.createElement("option", { key: "alnilam", value: "alnilam", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Alnilam — Nam, chắc giọng"),
+              React.createElement("option", { key: "aoede", value: "aoede", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Aoede — Nữ, nhẹ nhàng"),
+              React.createElement("option", { key: "autonoe", value: "autonoe", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Autonoe — Nữ, tươi sáng"),
+              React.createElement("option", { key: "callirrhoe", value: "callirrhoe", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Callirrhoe — Nữ, thoải mái"),
+              React.createElement("option", { key: "charon", value: "charon", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Charon — Nam, kể chuyện, trầm"),
+              React.createElement("option", { key: "despina", value: "despina", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Despina — Nữ, mượt"),
+              React.createElement("option", { key: "enceladus", value: "enceladus", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Enceladus — Nam, hơi thở, trầm"),
+              React.createElement("option", { key: "erinome", value: "erinome", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Erinome — Nữ, rõ ràng"),
+              React.createElement("option", { key: "fenrir", value: "fenrir", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Fenrir — Nam, hào hứng, trẻ"),
+              React.createElement("option", { key: "gacrux", value: "gacrux", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Gacrux — Nữ, trưởng thành"),
+              React.createElement("option", { key: "iapetus", value: "iapetus", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Iapetus — Nam, rõ ràng"),
+              React.createElement("option", { key: "kore", value: "kore", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Kore — Nữ, chắc giọng"),
+              React.createElement("option", { key: "laomedeia", value: "laomedeia", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Laomedeia — Nữ, vui tươi"),
+              React.createElement("option", { key: "leda", value: "leda", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Leda — Nữ, trẻ trung"),
+              React.createElement("option", { key: "orus", value: "orus", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Orus — Nam, chắc giọng"),
+              React.createElement("option", { key: "puck", value: "puck", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Puck — Nam, vui tươi"),
+              React.createElement("option", { key: "pulcherrima", value: "pulcherrima", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Pulcherrima — Trung tính, cao"),
+              React.createElement("option", { key: "rasalgethi", value: "rasalgethi", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Rasalgethi — Nam, kể chuyện"),
+              React.createElement("option", { key: "sadachbia", value: "sadachbia", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Sadachbia — Nam, sôi nổi, trầm"),
+              React.createElement("option", { key: "sadaltager", value: "sadaltager", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Sadaltager — Nam, hiểu biết"),
+              React.createElement("option", { key: "schedar", value: "schedar", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Schedar — Nam, đều giọng"),
+              React.createElement("option", { key: "sulafat", value: "sulafat", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Sulafat — Nữ, ấm áp"),
+              React.createElement("option", { key: "umbriel", value: "umbriel", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Umbriel — Nam, mượt, trầm"),
+              React.createElement("option", { key: "vindemiatrix", value: "vindemiatrix", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Vindemiatrix — Nữ, dịu dàng"),
+              React.createElement("option", { key: "zephyr", value: "zephyr", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Zephyr — Nữ, tươi sáng"),
+              React.createElement("option", { key: "zubenelgenubi", value: "zubenelgenubi", style: { background: "#0B0F17", color: "#e2e8f0" } }, "Zubenelgenubi — Nam, tự nhiên")
+            )
+          ),
+
+          // Dropdown Chuyển cảnh dùng khi bấm Ghép Phim (chữ trong danh sách có nền tối để luôn đọc được)
+          React.createElement("div", { className: "flex items-center gap-1.5" },
             React.createElement("span", { className: "text-xs text-slate-400 font-semibold whitespace-nowrap" }, "Chuyển cảnh:"),
             React.createElement("select", {
               value: currentProject.transition || "fade",
               onChange: e => updateProject(currentProject.id, { transition: e.target.value }),
               className: "bg-[#0B0F17] text-violet-200 text-xs border border-violet-500/30 rounded-lg px-2 py-1.5 outline-none cursor-pointer font-semibold"
             },
-              React.createElement("option", { value: "fade" }, "🌊 Hòa tan (Fade)"),
-              React.createElement("option", { value: "fadeblack" }, "🌑 Mờ đen (Fade Black)"),
-              React.createElement("option", { value: "dissolve" }, "✨ Mờ dần (Dissolve)"),
-              React.createElement("option", { value: "slideleft" }, "◀ Trượt trái"),
-              React.createElement("option", { value: "slideright" }, "▶ Trượt phải"),
-              React.createElement("option", { value: "wipeleft" }, "⬅ Quét trái"),
-              React.createElement("option", { value: "wiperight" }, "➡ Quét phải"),
-              React.createElement("option", { value: "circleopen" }, "⭕ Vòng tròn mở")
+              [
+                ["fade", "🌊 Hòa tan (Fade) — mặc định"],
+                ["none", "✂️ Cắt thẳng (không hiệu ứng)"],
+                ["fadeblack", "🌑 Mờ đen (Fade Black)"],
+                ["dissolve", "✨ Mờ dần (Dissolve)"],
+                ["slideleft", "◀ Trượt trái"],
+                ["slideright", "▶ Trượt phải"],
+                ["wipeleft", "⬅ Quét trái"],
+                ["wiperight", "➡ Quét phải"],
+                ["circleopen", "⭕ Vòng tròn mở"],
+                ["circleclose", "🔘 Vòng tròn đóng"]
+              ].map(([v, label]) => React.createElement("option", {
+                key: v, value: v, style: { background: "#0B0F17", color: "#e2e8f0" }
+              }, label))
             )
           ),
 
@@ -1231,10 +1510,28 @@ export default function StoryScriptStudio() {
             currentProject.progressText || "Đang xử lý kịch bản..."
           ),
 
-          currentProject.isRunning && React.createElement("button", {
-            onClick: () => handleCancelProject(currentProject.id),
+          currentProject.isPaused && React.createElement("div", {
+            className: "text-xs font-semibold text-sky-300 flex items-center gap-2"
+          }, currentProject.isRunning ? "⏸️ Đang tạm dừng — chờ cảnh đang tạo xong" : "⏸️ Đã tạm dừng — sửa / thêm prompt rồi bấm Tiếp tục"),
+
+          // Tạm dừng ↔ Tiếp tục
+          currentProject.isRunning && !currentProject.isPaused && React.createElement("button", {
+            onClick: () => pauseStoryProject(currentProject.id),
+            title: "Cảnh đang tạo vẫn chạy xong, dây chuyền dừng trước cảnh kế tiếp để sửa / thêm prompt",
+            className: "inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-bold text-amber-200 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 cursor-pointer shadow transition-all"
+          }, "⏸️ Tạm dừng"),
+          currentProject.isPaused && React.createElement("button", {
+            onClick: () => resumeStoryProject(currentProject.id),
+            title: "Nhận prompt / thông tin mới nhất rồi tạo tiếp, nối frame cuối cảnh trước",
+            className: "inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-bold text-emerald-200 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 cursor-pointer shadow transition-all"
+          }, "▶️ Tiếp tục"),
+
+          // Đặt lại: xóa hết video, tạo lại từ Cảnh 1 với nguyên thông tin
+          (currentProject.isRunning || currentProject.isPaused || (currentProject.completedVideos || []).length > 0) && React.createElement("button", {
+            onClick: () => resetStoryProject(currentProject.id),
+            title: "Dừng và xóa toàn bộ video của dự án (giữ prompt, ảnh, cài đặt) — không tự chạy",
             className: "inline-flex items-center gap-1 px-3 py-2 rounded-xl text-xs font-bold text-rose-300 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 cursor-pointer shadow transition-all"
-          }, "⏹️ Dừng / Đặt lại"),
+          }, "🔁 Đặt lại"),
 
           // Nút Biên Tập Video — mở Video Editor với các video của dự án này
           React.createElement("button", {
@@ -1268,9 +1565,9 @@ export default function StoryScriptStudio() {
 
           React.createElement("button", {
             onClick: () => handleRunProject(currentProject.id),
-            disabled: currentProject.isRunning || currentProject.prompts.length === 0,
+            disabled: currentProject.isRunning || currentProject.isPaused || currentProject.prompts.length === 0,
             className: `inline-flex items-center gap-2 px-5 py-2 rounded-xl text-xs font-bold text-white shadow-lg transition-all cursor-pointer ${
-              currentProject.isRunning
+              currentProject.isRunning || currentProject.isPaused
                 ? "bg-slate-700 opacity-60 cursor-not-allowed"
                 : "bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 shadow-[0_4px_20px_rgba(124,58,237,0.45)] hover:scale-[1.03]"
             }`
@@ -1282,6 +1579,12 @@ export default function StoryScriptStudio() {
           )
         )
       ),
+
+      // VÙNG CẢNH CUỘN RIÊNG — thanh công cụ đứng yên phía trên
+      React.createElement("div", {
+        className: "flex-1 min-h-0 overflow-y-auto flex flex-col gap-4",
+        style: { paddingBottom: 16, paddingRight: 4 }
+      },
 
       // THANH TÌM KIẾM & THỐNG KÊ
       React.createElement("div", {
@@ -1310,8 +1613,10 @@ export default function StoryScriptStudio() {
       ),
 
       // DANH SÁCH CÁC CẢNH PHIM TRONG DỰ ÁN (TỐI GIẢN - NỐI TIẾP CẢNH CHUẨN)
+      // LƯỚI Ô CẢNH: mỗi cảnh một ô nhỏ, xếp ngang, hết chỗ thì xuống hàng
       React.createElement("div", {
-        className: "flex flex-col gap-3"
+        className: "flex flex-col gap-3",
+        style: filteredScenes.length > 0 ? { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: 12, alignItems: "start" } : undefined
       },
         currentProject.prompts.length === 0
           ? React.createElement("div", {
@@ -1335,7 +1640,7 @@ export default function StoryScriptStudio() {
 
               return React.createElement("div", {
                 key: scene.id,
-                className: `flex flex-col md:flex-row items-start md:items-center gap-3 p-3.5 rounded-xl border transition-all ${
+                className: `flex flex-col gap-2 p-3 rounded-xl border transition-all ${
                   scene.status === "Running"
                     ? "border-amber-400/80 bg-amber-500/10 shadow-[0_0_15px_rgba(245,158,11,0.2)]"
                     : scene.status === "Failed"
@@ -1343,10 +1648,11 @@ export default function StoryScriptStudio() {
                     : scene.status === "Completed"
                     ? "border-emerald-500/40 bg-emerald-500/5"
                     : "border-white/[0.08] bg-[#101726]"
-                }`
+                }`,
+                style: { minWidth: 0 }
               },
                 // Cột 1: Thứ tự cảnh & Nhãn chế độ tự động
-                React.createElement("div", { className: "flex flex-col gap-1 w-28 shrink-0" },
+                React.createElement("div", { className: "flex items-center gap-2" },
                   React.createElement("div", { className: "flex items-center gap-2" },
                     React.createElement("span", {
                       className: "w-6 h-6 rounded-md bg-violet-600/30 text-violet-300 border border-violet-500/40 flex items-center justify-center text-xs font-bold font-mono"
@@ -1358,6 +1664,8 @@ export default function StoryScriptStudio() {
                   }, idx === 0 ? "Mở đầu" : "🔗 Nối tiếp")
                 ),
 
+                // Hàng ảnh tham chiếu (trái) — video, tạo lại, xóa (phải)
+                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 } },
                 // Cột 2: Ảnh tham chiếu — nhiều ảnh không giới hạn
                 React.createElement("div", { className: "shrink-0 flex flex-col gap-1 max-w-[220px]" },
                   React.createElement("div", { className: "flex items-center justify-between" },
@@ -1415,69 +1723,8 @@ export default function StoryScriptStudio() {
                   )
                 ),
 
-                // Cột 3: Khung Prompt (Gõ trực tiếp thoải mái select-text)
-                React.createElement("div", { className: "flex-1 min-w-0 w-full" },
-                  React.createElement("textarea", {
-                    value: scene.prompt,
-                    onChange: e => handleUpdateScene(scene.id, { prompt: e.target.value }),
-                    placeholder: `Mô tả nội dung cho Cảnh ${scene.index}...`,
-                    rows: 2,
-                    className: "w-full bg-[#0B0F17] text-white text-xs border border-white/10 rounded-lg p-2 outline-none focus:border-violet-500 transition-colors resize-none leading-relaxed select-text"
-                  })
-                ),
-
-                // Cột 4: Nền tảng, Tỷ lệ, Thời lượng
-                React.createElement("div", { className: "flex items-center gap-2 shrink-0" },
-                  React.createElement("select", {
-                    value: scene.provider,
-                    onChange: e => handleUpdateScene(scene.id, {
-                      provider: e.target.value,
-                      model: e.target.value === "Muse AI" ? "muse-video" : (e.target.value === "Grok" ? "grok-imagine-video" : "Veo 3.1 - Fast"),
-                      duration: e.target.value === "Muse AI" ? "10s" : (e.target.value === "Grok" ? "6s" : "8s")
-                    }),
-                    className: "bg-[#0B0F17] text-white text-xs border border-white/10 rounded-lg px-2 py-1.5 outline-none cursor-pointer font-semibold"
-                  },
-                    React.createElement("option", { value: "Muse AI" }, "Muse AI"),
-                    React.createElement("option", { value: "Veo3" }, "Veo 3"),
-                    React.createElement("option", { value: "Grok" }, "Grok")
-                  ),
-
-                  !scene.provider.includes("Muse") && !scene.provider.includes("Grok") && React.createElement("select", {
-                    value: scene.model || "Veo 3.1 - Fast",
-                    onChange: e => handleUpdateScene(scene.id, { model: e.target.value }),
-                    className: "bg-[#0B0F17] text-slate-300 text-xs border border-white/10 rounded-lg px-2 py-1.5 outline-none cursor-pointer"
-                  },
-                    React.createElement("option", { value: "Omni 1.1 Flash" }, "Omni Flash"),
-                    React.createElement("option", { value: "Veo 3.1 - Lite" }, "3.1 Lite"),
-                    React.createElement("option", { value: "Veo 3.1 Lite [LowPriority]" }, "3.1 Lite LP"),
-                    React.createElement("option", { value: "Veo 3.1 - Fast" }, "3.1 Fast"),
-                    React.createElement("option", { value: "Veo 3.1 - Quality" }, "3.1 Quality")
-                  ),
-
-                  React.createElement("select", {
-                    value: scene.ratio,
-                    onChange: e => handleUpdateScene(scene.id, { ratio: e.target.value }),
-                    className: "bg-[#0B0F17] text-white text-xs border border-white/10 rounded-lg px-2 py-1.5 outline-none cursor-pointer"
-                  },
-                    React.createElement("option", { value: "16:9" }, "16:9"),
-                    React.createElement("option", { value: "9:16" }, "9:16"),
-                    React.createElement("option", { value: "1:1" }, "1:1")
-                  ),
-
-                  React.createElement("select", {
-                    value: scene.duration || (scene.provider === "Muse AI" ? "10s" : "8s"),
-                    onChange: e => handleUpdateScene(scene.id, { duration: e.target.value }),
-                    className: "bg-[#0B0F17] text-slate-300 text-xs border border-white/10 rounded-lg px-2 py-1.5 outline-none cursor-pointer font-mono"
-                  },
-                    React.createElement("option", { value: "5s" }, "5s"),
-                    React.createElement("option", { value: "6s" }, "6s"),
-                    React.createElement("option", { value: "8s" }, "8s"),
-                    React.createElement("option", { value: "10s" }, "10s")
-                  )
-                ),
-
                 // Cột 5: Thumbnail video kết quả + Trạng thái + Thao tác
-                React.createElement("div", { className: "flex items-center gap-2 shrink-0 justify-end" },
+                React.createElement("div", { className: "flex items-center gap-2 shrink-0 justify-end", style: { paddingTop: 16 } },
                   // Thumbnail video kết quả (chỉ hiện khi đã có video)
                   scene.videoUrl
                     ? React.createElement("div", {
@@ -1521,11 +1768,16 @@ export default function StoryScriptStudio() {
                     className: "text-xs text-slate-500 font-semibold"
                   }, "Chờ"),
 
-                  // Cảnh bị lỗi: dây chuyền đang CHỜ — bấm Tạo lại để tự động tiếp tục
-                  scene.status === "Failed" && React.createElement("button", {
+                  // Nút Tạo lại cho mọi cảnh đã tạo xong (lỗi hay thành công): xóa video từ cảnh này trở xuống,
+                  // giữ prompt, chạy lại từ frame cuối cảnh liền trước
+                  (scene.status === "Failed" || scene.status === "Completed" || !!scene.videoUrl) && React.createElement("button", {
                     onClick: () => handleRetryScene(scene.id),
-                    title: scene.error ? `Lỗi: ${scene.error}` : "Cảnh này gặp lỗi, bấm để tạo lại và tự động tiếp tục dây chuyền",
-                    className: "inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-red-600/20 border border-red-500/50 text-red-300 hover:bg-red-600/30 hover:text-red-200 text-[10px] font-bold transition-colors cursor-pointer whitespace-nowrap"
+                    title: scene.status === "Failed"
+                      ? (scene.error ? `Lỗi: ${scene.error} — bấm để tạo lại từ cảnh này` : "Cảnh này gặp lỗi, bấm để tạo lại từ cảnh này")
+                      : "Tạo lại từ cảnh này: xóa video cảnh này và các cảnh phía dưới (giữ prompt), chạy lại từ frame cuối cảnh trước",
+                    className: scene.status === "Failed"
+                      ? "inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-red-600/20 border border-red-500/50 text-red-300 hover:bg-red-600/30 hover:text-red-200 text-[10px] font-bold transition-colors cursor-pointer whitespace-nowrap"
+                      : "inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-violet-600/20 border border-violet-500/50 text-violet-200 hover:bg-violet-600/30 hover:text-white text-[10px] font-bold transition-colors cursor-pointer whitespace-nowrap"
                   }, "🔄 Tạo lại"),
 
                   React.createElement("button", {
@@ -1533,6 +1785,69 @@ export default function StoryScriptStudio() {
                     title: "Xóa cảnh này",
                     className: "p-1.5 text-slate-500 hover:text-red-400 rounded-lg hover:bg-white/5 transition-colors cursor-pointer text-sm"
                   }, "🗑️")
+                )
+                ),
+
+                // Cột 3: Khung Prompt (Gõ trực tiếp thoải mái select-text)
+                React.createElement("div", { className: "flex-1 min-w-0 w-full" },
+                  React.createElement("textarea", {
+                    value: scene.prompt,
+                    onChange: e => handleUpdateScene(scene.id, { prompt: e.target.value }),
+                    placeholder: `Mô tả nội dung cho Cảnh ${scene.index}...`,
+                    rows: 3,
+                    className: "w-full bg-[#0B0F17] text-white text-xs border border-white/10 rounded-lg p-2 outline-none focus:border-violet-500 transition-colors resize-none leading-relaxed select-text"
+                  })
+                ),
+
+                // Cột 4: Nền tảng, Tỷ lệ, Thời lượng
+                React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+                  React.createElement("select", {
+                    value: scene.provider,
+                    onChange: e => handleUpdateScene(scene.id, {
+                      provider: e.target.value,
+                      model: e.target.value === "Muse AI" ? "muse-video" : (e.target.value === "Grok" ? "grok-imagine-video" : "Veo 3.1 - Fast"),
+                      duration: e.target.value === "Muse AI" ? "10s" : (e.target.value === "Grok" ? "6s" : "8s")
+                    }),
+                    className: "bg-[#0B0F17] text-white text-xs border border-white/10 rounded-lg px-2 py-1.5 outline-none cursor-pointer font-semibold"
+                  },
+                    React.createElement("option", { value: "Muse AI" }, "Muse AI"),
+                    React.createElement("option", { value: "Veo3" }, "Veo 3"),
+                    React.createElement("option", { value: "Grok" }, "Grok")
+                  ),
+
+                  !scene.provider.includes("Muse") && !scene.provider.includes("Grok") && React.createElement("select", {
+                    value: scene.model || "Veo 3.1 - Fast",
+                    onChange: e => handleUpdateScene(scene.id, { model: e.target.value }),
+                    className: "bg-[#0B0F17] text-slate-300 text-xs border border-white/10 rounded-lg px-2 py-1.5 outline-none cursor-pointer"
+                  },
+                    React.createElement("option", { value: "Omni 1.2 Flash" }, "Omni 1.2 Flash"),
+                    React.createElement("option", { value: "Omni 1.1 Flash" }, "Omni Flash"),
+                    React.createElement("option", { value: "Veo 3.1 - Lite" }, "3.1 Lite"),
+                    React.createElement("option", { value: "Veo 3.1 Lite [LowPriority]" }, "3.1 Lite LP"),
+                    React.createElement("option", { value: "Veo 3.1 - Fast" }, "3.1 Fast"),
+                    React.createElement("option", { value: "Veo 3.1 - Quality" }, "3.1 Quality")
+                  ),
+
+                  React.createElement("select", {
+                    value: scene.ratio,
+                    onChange: e => handleUpdateScene(scene.id, { ratio: e.target.value }),
+                    className: "bg-[#0B0F17] text-white text-xs border border-white/10 rounded-lg px-2 py-1.5 outline-none cursor-pointer"
+                  },
+                    React.createElement("option", { value: "16:9" }, "16:9"),
+                    React.createElement("option", { value: "9:16" }, "9:16"),
+                    React.createElement("option", { value: "1:1" }, "1:1")
+                  ),
+
+                  React.createElement("select", {
+                    value: scene.duration || (scene.provider === "Muse AI" ? "10s" : "8s"),
+                    onChange: e => handleUpdateScene(scene.id, { duration: e.target.value }),
+                    className: "bg-[#0B0F17] text-slate-300 text-xs border border-white/10 rounded-lg px-2 py-1.5 outline-none cursor-pointer font-mono"
+                  },
+                    React.createElement("option", { value: "5s" }, "5s"),
+                    React.createElement("option", { value: "6s" }, "6s"),
+                    React.createElement("option", { value: "8s" }, "8s"),
+                    React.createElement("option", { value: "10s" }, "10s")
+                  )
                 )
               );
             })
@@ -1581,7 +1896,8 @@ export default function StoryScriptStudio() {
           )
         )
       )
-    ),
+    
+      )),
 
     // ========================================================================
     // MODAL XEM VIDEO PHÓNG TO (FULLSCREEN VIDEO VIEWER)
