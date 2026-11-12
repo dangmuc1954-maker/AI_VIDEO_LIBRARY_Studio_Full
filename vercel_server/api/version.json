@@ -1,9 +1,9 @@
 {
-  "version": "3.1.4",
-  "name": "AI VIDEO LIBRARY v3.1.4",
+  "version": "3.1.5",
+  "name": "AI VIDEO LIBRARY v3.1.5",
   "releaseDate": "2026-11-12",
-  "changelog": "Thêm Omni 1.2 Flash và chọn giọng Google Flow (kể cả Khung hình). Studio Kịch Bản: thanh công cụ cố định, nút Ghép Phim có chuyển cảnh, Tạm dừng/Tiếp tục và Đặt lại tách riêng, nút Tạo lại từng cảnh, nối thêm prompt khi đang chạy, nhập prompt nối tiếp, giao diện ô cảnh xếp lưới gọn",
-  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.1.4/update-patch.zip",
+  "changelog": "Studio Kịch Bản: sửa lỗi mất nối frame cuối (thử lại tự động, lỗi thì dừng và báo rõ để Tạo lại), nút Tạo Video chạy tiếp từ cảnh chưa xong, hiện rõ tên tài khoản trong ô chọn tài khoản",
+  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.1.5/update-patch.zip",
   "mandatory": false,
   "minVersion": "3.0.0"
 }

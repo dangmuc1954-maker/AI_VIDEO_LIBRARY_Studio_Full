@@ -238,6 +238,24 @@ function resetStoryProject(projId) {
   }
 }
 
+// Trích frame cuối của 1 video, thử lại vài lần (file video vừa tải xong có thể chưa sẵn sàng)
+let storyLastFrameError = "";
+async function extractFrameWithRetry(assetsApi, args, tries = 4) {
+  let lastErr = null;
+  storyLastFrameError = "";
+  for (let t = 0; t < tries; t++) {
+    try {
+      const ex = await assetsApi?.extractLastFrame?.(args);
+      if (ex?.id) return ex;
+      lastErr = new Error("không trả về ảnh frame");
+    } catch (e) { lastErr = e; }
+    if (t < tries - 1) await new Promise(r => setTimeout(r, 3000));
+  }
+  console.error("[StoryScript] Trích frame cuối thất bại:", args, lastErr);
+  storyLastFrameError = String(lastErr?.message || lastErr || "").slice(0, 200);
+  return null;
+}
+
 // Danh sách cảnh có prompt, đọc MỚI từ store (prompt thêm trong lúc chạy vẫn được nối vào dây chuyền)
 function getLiveScenes(projId) {
   const p = StoryStore.getState().projects.find(x => x.id === projId);
@@ -425,6 +443,7 @@ async function runStoryProjectCore(projId, options = {}) {
     // Tạo lại giữa chừng: lấy frame cuối của ĐÚNG cảnh liền trước (trích lại từ video cảnh đó),
     // dự phòng frame đã lưu trên cảnh, rồi mới tới frame nối gần nhất của dự án (cách cũ).
     let lastExtractedFrameAsset = null;
+    let lastFrameSceneId = null; // frame đang giữ là của cảnh nào
     if (startIndex > 0) {
       const targetScene = validPrompts[startIndex];
       const prevScene = validPrompts[startIndex - 1];
@@ -440,12 +459,10 @@ async function runStoryProjectCore(projId, options = {}) {
       if (!lastExtractedFrameAsset && targetScene?.lastExtractedFrameAssetId) {
         lastExtractedFrameAsset = { id: targetScene.lastExtractedFrameAssetId, url: targetScene.lastExtractedFrameUrl || "" };
       }
-      if (!lastExtractedFrameAsset && proj.chainFrameAssetId) {
+      if (!lastExtractedFrameAsset && proj.chainFrameAssetId && proj.chainFrameSceneId && proj.chainFrameSceneId === prevScene?.id) {
         lastExtractedFrameAsset = { id: proj.chainFrameAssetId, url: proj.chainFrameUrl };
       }
-      if (!lastExtractedFrameAsset) {
-        toast.warning(`Không lấy được frame cuối Cảnh ${prevScene?.index} — Cảnh ${targetScene?.index} sẽ chạy với ảnh tham chiếu riêng.`);
-      }
+      if (lastExtractedFrameAsset) lastFrameSceneId = prevScene?.id || null;
     }
 
     // Đi theo id cảnh, đọc danh sách MỚI mỗi lượt → prompt thêm trong lúc chạy được nối tiếp vào dây chuyền
@@ -481,6 +498,29 @@ async function runStoryProjectCore(projId, options = {}) {
       // ====================================================================
       let refIds = [];
       const userOwnRefs = Array.isArray(curScene.referenceAssetIds) ? curScene.referenceAssetIds : [];
+
+      if (i > 0) {
+        const prevScene = liveList[i - 1];
+        if (!lastExtractedFrameAsset?.id || lastFrameSceneId !== prevScene.id) {
+          lastExtractedFrameAsset = null;
+          if (prevScene.assetId) {
+            updateProject(projId, { progressText: `Đang lấy frame cuối Cảnh ${prevScene.index}...` });
+            const ex = await extractFrameWithRetry(assetsApi, { assetId: prevScene.assetId, promptOrder: prevScene.index });
+            if (ex?.id) { lastExtractedFrameAsset = ex; lastFrameSceneId = prevScene.id; }
+          }
+        }
+        if (!lastExtractedFrameAsset?.id) {
+          throw new Error(prevScene.assetId
+            ? `Không lấy được frame cuối Cảnh ${prevScene.index} để nối sang Cảnh ${sceneNum}. Bấm "Tạo lại" ở Cảnh ${sceneNum} để thử lại, hoặc ở Cảnh ${prevScene.index} nếu video cảnh đó hỏng.${storyLastFrameError ? ` (Chi tiết: ${storyLastFrameError})` : ""}`
+            : `Cảnh ${prevScene.index} chưa có video để nối sang Cảnh ${sceneNum}. Hãy tạo Cảnh ${prevScene.index} trước.`);
+        }
+        // Hiện frame nối trên ô cảnh (để nhìn và để "Tạo lại" dùng đúng frame)
+        const fUrl = lastExtractedFrameAsset.url || lastExtractedFrameAsset.thumbnailUrl || "";
+        updateProject(projId, p => ({
+          ...p,
+          prompts: p.prompts.map(s => s.id === curScene.id ? { ...s, lastExtractedFrameUrl: fUrl, lastExtractedFrameAssetId: lastExtractedFrameAsset.id } : s)
+        }));
+      }
 
       if (i === 0) {
         refIds = [...userOwnRefs];
@@ -680,15 +720,18 @@ async function runStoryProjectCore(projId, options = {}) {
 
       // Trích xuất Frame cuối để nạp sang Cảnh tiếp theo — luôn trích (prompt có thể được thêm sau),
       // lưu cả id frame lên cảnh kế tiếp để bấm "Tạo lại" dùng đúng frame
+      lastExtractedFrameAsset = null;
+      lastFrameSceneId = null;
       try {
         updateProject(projId, { progressText: `Đang trích xuất frame cuối Cảnh ${sceneNum}...` });
-        const extracted = await assetsApi?.extractLastFrame?.({
+        const extracted = await extractFrameWithRetry(assetsApi, {
           assetId: resultVideoAssetId,
           jobId: jobId,
           promptOrder: sceneNum
         });
         if (extracted?.id) {
           lastExtractedFrameAsset = extracted;
+          lastFrameSceneId = curScene.id;
           const afterList = getLiveScenes(projId);
           const nextScene = afterList[afterList.findIndex(s => s.id === curScene.id) + 1];
           const frameUrl = extracted.url || extracted.thumbnailUrl || "";
@@ -696,6 +739,7 @@ async function runStoryProjectCore(projId, options = {}) {
             ...p,
             chainFrameAssetId: extracted.id,
             chainFrameUrl: frameUrl,
+            chainFrameSceneId: curScene.id,
             prompts: nextScene
               ? p.prompts.map(s => s.id === nextScene.id ? { ...s, lastExtractedFrameUrl: frameUrl, lastExtractedFrameAssetId: extracted.id } : s)
               : p.prompts
@@ -1202,7 +1246,16 @@ export default function StoryScriptStudio() {
   }, [currentProject?.id, updateProject]);
 
   // Chạy dự án — logic thực tế nằm ở module-level runStoryProjectCore (sống độc lập component)
-  const handleRunProject = runStoryProjectCore;
+  const handleRunProject = (projId) => {
+    const proj = StoryStore.getState().projects.find(p => p.id === projId);
+    const live = getLiveScenes(projId);
+    const firstTodo = live.findIndex(s => s.status !== "Completed");
+    if (proj && firstTodo > 0) {
+      // Đã có cảnh xong (vd 20 cảnh) + cảnh mới (21...) → chạy tiếp từ cảnh chưa xong. Muốn làm lại từ đầu: bấm "Đặt lại".
+      return runStoryProjectCore(projId, { resumeFromSceneId: live[firstTodo].id, continueMode: true });
+    }
+    return runStoryProjectCore(projId);
+  };
 
   // Tạo lại 1 cảnh (lỗi hay đã xong): xóa video từ cảnh đó trở xuống, chạy lại từ frame cuối cảnh liền trước
   const handleRetryScene = (sceneId) => {
@@ -1493,8 +1546,8 @@ export default function StoryScriptStudio() {
                   onChange: e => handleSelectProjectAccount(currentProject.id, pk, e.target.value),
                   className: "bg-transparent text-xs font-semibold text-slate-200 outline-none cursor-pointer max-w-[130px] truncate"
                 },
-                  React.createElement("option", { value: "auto", className: "bg-[#0B0F17] text-amber-300" }, "🔄 Tự động chia"),
-                  accs.map(a => React.createElement("option", { key: a.accountId, value: a.accountId, className: "bg-[#0B0F17] text-slate-200" }, a.accountName || a.accountDisplayName || a.accountEmail || a.accountId))
+                  React.createElement("option", { value: "auto", className: "bg-[#0B0F17] text-amber-300", style: { background: "#0B0F17", color: "#fcd34d" } }, "🔄 Tự động chia"),
+                  accs.map(a => React.createElement("option", { key: a.accountId, value: a.accountId, className: "bg-[#0B0F17] text-slate-200", style: { background: "#0B0F17", color: "#e2e8f0" } }, a.accountName || a.accountDisplayName || a.accountEmail || a.accountId))
                 ) : React.createElement("span", { className: "text-xs text-slate-500" }, `Chưa có ${meta.label}`)
               );
             });
