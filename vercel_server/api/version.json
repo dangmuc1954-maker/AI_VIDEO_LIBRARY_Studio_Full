@@ -1,9 +1,9 @@
 {
-  "version": "3.1.9",
-  "name": "AI VIDEO LIBRARY v3.1.9",
+  "version": "3.2.0",
+  "name": "AI VIDEO LIBRARY v3.2.0",
   "releaseDate": "2026-11-12",
-  "changelog": "Xóa watermark video Veo sạch như gốc, không nhòe (tính ngược độ trong suốt, tự dò dấu, tự chỉnh độ đậm từng video). Workflow: node Flow có video tham chiếu tự lấy thời lượng theo video (Auto), viền LED chạy quanh node khi đang tạo.",
-  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.1.9/update-patch.zip",
+  "changelog": "Workflow: viền LED chạy vòng quanh node khi đang tạo, trong node hiện thời gian chạy và % tiến độ.",
+  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.2.0/update-patch.zip",
   "mandatory": false,
   "minVersion": "3.0.0"
 }
