@@ -1,6 +1,6 @@
 {
   "files": {
-    "app/out/main/index.js": "5ea8f1b950ebe66dd14591214e74651a98197228a28f2db92ab909e494001293",
+    "app/out/main/index.js": "bb2403efedfb9c5e36cc3505019ea47990f0d32d203707c290925a19fc1c98e2",
     "app/out/main/google_flow_native_transport.cjs": "8d50f4e4c6d423ce72452e654be2f0233c257a66a081772bcc2f1b9e0f7f4e43",
     "app/out/preload/index.cjs": "beda24188b3361997dddf3275bdc4483dc89a049cc389c544460cfcdb690e8bc",
     "app/out/renderer/assets/useWorkflowRunner-DGw6Ekx4.js": "3c6d9cc19aee43fa93eb15f793df7d0ec6808a6c6a8f918fd60965437d91be03",
@@ -33,6 +33,10 @@
     {
       "at": "2026-11-12T09:12:37.038Z",
       "reason": "Tris duyệt 12/11: ElevenLabs tự xin chìa khóa mới khi hết hạn + báo đúng lỗi khóa gói free và xoay tài khoản"
+    },
+    {
+      "at": "2026-11-12T09:22:10.735Z",
+      "reason": "Tris duyệt 12/11: ElevenLabs khóa gói free không còn đứng chờ mãi — hết tài khoản dùng được thì dừng và báo rõ"
     }
   ]
 }
