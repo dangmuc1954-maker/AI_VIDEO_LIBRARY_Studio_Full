@@ -1,13 +1,13 @@
 {
   "files": {
-    "app/out/main/index.js": "bb2403efedfb9c5e36cc3505019ea47990f0d32d203707c290925a19fc1c98e2",
-    "app/out/main/google_flow_native_transport.cjs": "8d50f4e4c6d423ce72452e654be2f0233c257a66a081772bcc2f1b9e0f7f4e43",
+    "app/out/main/index.js": "9a00072464fa8f21bafb7847fbc8f82397d1a40d923440678e1f3da583a57ed1",
+    "app/out/main/google_flow_native_transport.cjs": "da661f7c71987b70fdff57fd664803bf5d2ab74b66d01633f19e88572bd2d90b",
     "app/out/preload/index.cjs": "beda24188b3361997dddf3275bdc4483dc89a049cc389c544460cfcdb690e8bc",
-    "app/out/renderer/assets/useWorkflowRunner-DGw6Ekx4.js": "3c6d9cc19aee43fa93eb15f793df7d0ec6808a6c6a8f918fd60965437d91be03",
-    "app/out/renderer/assets/VideoStudio-frcr8V6s.js": "8ff017c462b7a9c735e9eb7beddf8f2c81336b28e6545c29dd648201423378c3",
+    "app/out/renderer/assets/useWorkflowRunner-DGw6Ekx4.js": "3f437eff47f99fb49df39e48e0a549048befd8e2bd7e9d6a90bbf533c7a84304",
+    "app/out/renderer/assets/VideoStudio-frcr8V6s.js": "8419ff3f7b92377cd51be953ffc8e4ee0c18986538d5b778b599653b2558aba5",
     "app/out/renderer/assets/ImageStudio-4nmpUX3j.js": "936636d351a49fa7571dd49519f1df6d6f625b611bb36dcbcc74bbdd52a85af3",
     "app/out/renderer/assets/StudioFailedBulkActions-Zv2NpUPy.js": "f4a9d7d6389f209fbb6b7f6c609a35691d8f17ba7b72b24c4ffb09b818350a82",
-    "app/out/renderer/assets/index-BS7vgKVV.js": "c53d4bc83e1178017e4dc1187f102f827c6575173e896ad2e5e99e4c6280ebb4"
+    "app/out/renderer/assets/index-BS7vgKVV.js": "7d960921a6df9ffcce35e34f5677abefb0ca3c67b524f208d6b5ae5fd7492fd5"
   },
   "history": [
     {
@@ -37,6 +37,10 @@
     {
       "at": "2026-11-12T09:22:10.735Z",
       "reason": "Tris duyệt 12/11: ElevenLabs khóa gói free không còn đứng chờ mãi — hết tài khoản dùng được thì dừng và báo rõ"
+    },
+    {
+      "at": "2026-11-12T14:43:05.713Z",
+      "reason": "Tris duyệt 12/11/2026: API Key ElevenLabs + báo lỗi giọng thư viện; video tham chiếu Veo3 (Omni Flash/Omni 1.2) cho Studio Video, Kịch Bản, workflow; workflow: node Video tham chiếu, cổng video tham chiếu, cổng Frame cuối, Omni 1.2 trong node, giao diện mới"
     }
   ]
 }

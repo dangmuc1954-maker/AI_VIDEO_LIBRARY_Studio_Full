@@ -702,16 +702,15 @@ function buildVideoEnvelope(params, recaptchaToken, rpcConfig) {
 
   let modePayload;
   if (params.mode === 'Edit') {
+    // Video tham chiếu (đúng như Flow gửi): [null, videoMediaId, khungĐầu, khungCuối] — 24 khung/giây
     modePayload = [
-      [null, params.sourceVideoMediaId, 0, params.sourceVideoEndFrame],
+      [null, params.sourceVideoMediaId, params.sourceVideoStartFrame || 0, params.sourceVideoEndFrame],
       promptStruct,
       params.modelKey,
       ratioEnum,
       [null, null, null, null, u1, u2],
       null, null, null,
-      (params.referenceMediaIds || []).map(id => [null, id]),
-      null, null, null,
-      [resolutionCode]
+      (params.referenceMediaIds || []).map(id => [null, id])
     ];
   } else if (params.mode === 'Frames' && params.startMediaId && params.endMediaId) {
     modePayload = [
@@ -1081,7 +1080,8 @@ module.exports = {
       accountId: session.accountId,
       mediaId: params.mediaId,
       statusCode,
-      status
+      status,
+      ...(status === 'FAILED' ? { failedRaw: res.text.slice(0, 3000) } : {})
     });
 
     return { statusCode: statusCode || 2, status, raw: data };
@@ -1363,6 +1363,50 @@ module.exports = {
 
       return { mediaId: params.mediaId, imageUrl: imgUrl || '' };
     }, signal);
+  },
+
+
+  // 8. Tải VIDEO tham chiếu lên Google Flow (giống Flow web: Scotty resumable upload)
+  async executeFlowUploadVideo(host, session, params, signal, rpcConfig) {
+    const readyView = await host.ensureGoogleFlowViewReady(session, signal);
+    const siteKey = rpcConfig?.recaptcha?.siteKey || '6LdsFiUsAAAAAIjVDZcuLhaHiDn5nnHVXVRQGeMV';
+    await ensurePartitionAuthenticated(session, readyView.view);
+    const context = await requestContext(readyView.view, siteKey, '', 20000, signal);
+    if (!context.at) throw new Error('Google Flow chưa sẵn sàng để tải video tham chiếu (thiếu mã phiên). Mở lại tài khoản Flow trong Browser Hub rồi thử lại.');
+    const bytes = await fs.promises.readFile(params.filePath);
+    if (!bytes.length) throw new Error('File video tham chiếu rỗng.');
+    if (bytes.length > 100 * 1024 * 1024) throw new Error('Video tham chiếu phải nhỏ hơn 100 MB (giới hạn của Google Flow).');
+    const ses = electron.session.fromPartition(session.partition);
+    const origin = 'https://flow.google.com';
+    const ua = context.fingerprint?.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+    const base = { 'origin': origin, 'referer': origin + '/project/' + params.projectId, 'user-agent': ua, 'X-Framework-Xsrf-Token': context.at };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10 * 60 * 1000);
+    if (signal) signal.addEventListener('abort', () => controller.abort(), { once: true });
+    try {
+      const start = await ses.fetch(origin + '/upload/v1/flow/upload/video/' + encodeURIComponent(params.projectId), {
+        method: 'POST', credentials: 'include', signal: controller.signal,
+        headers: { ...base, 'Slug': encodeURIComponent(params.fileName || 'reference.mp4'), 'X-Goog-Upload-Protocol': 'resumable', 'X-Goog-Upload-Command': 'start', 'X-Goog-Upload-Header-Content-Length': String(bytes.length), 'X-Goog-Upload-Header-Content-Type': params.mimeType || 'video/mp4' }
+      });
+      const upUrl = start.headers.get('x-goog-upload-url');
+      if (!start.ok || !upUrl) throw new Error('Google Flow từ chối tải video tham chiếu (HTTP ' + start.status + ').');
+      const fin = await ses.fetch(upUrl, {
+        method: 'POST', credentials: 'include', signal: controller.signal,
+        headers: { ...base, 'X-Goog-Upload-Command': 'upload, finalize', 'X-Goog-Upload-Offset': '0' },
+        body: bytes
+      });
+      const text = await fin.text();
+      if (!fin.ok) throw new Error('Tải video tham chiếu lên Google Flow lỗi (HTTP ' + fin.status + '): ' + text.slice(0, 200));
+      let j = {};
+      try { j = JSON.parse(text); } catch (_) { throw new Error('Google Flow trả kết quả tải video không đọc được: ' + text.slice(0, 200)); }
+      const mediaId = j.mediaId || j.media?.name;
+      if (!mediaId) throw new Error('Google Flow không trả mã video sau khi tải lên: ' + text.slice(0, 200));
+      const dim = j.media?.video?.dimensions || {};
+      const durationSec = parseFloat(String(dim.length || '0').replace('s', '')) || 0;
+      return { mediaId, workflowId: j.workflow?.name || j.media?.workflowId || '', durationSec, width: dim.width || 0, height: dim.height || 0 };
+    } finally {
+      clearTimeout(timer);
+    }
   },
 
   // 7. Video Upscale (Veo 3)

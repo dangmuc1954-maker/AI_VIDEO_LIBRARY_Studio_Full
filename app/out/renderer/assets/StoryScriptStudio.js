@@ -1083,7 +1083,8 @@ export default function StoryScriptStudio() {
     try {
       const input = document.createElement("input");
       input.type = "file";
-      input.accept = "image/*";
+      // Tris 12/11/2026: cảnh Veo3 nhận thêm VIDEO tham chiếu (Omni Flash / Omni 1.2 Flash), mỗi cảnh 1 video
+      input.accept = "image/*,video/mp4,video/quicktime,video/webm";
       input.multiple = true;
       input.onchange = async (e) => {
         const files = Array.from(e.target.files || []);
@@ -1091,6 +1092,40 @@ export default function StoryScriptStudio() {
         const assetsApi = window.aiforge?.assets || window.aivideo?.assets;
         let addedCount = 0;
         for (const file of files) {
+          if (/^video\//.test(file.type || "")) {
+            try {
+              const sc = (StoryStore.getState().projects.find(p => p.id === projId)?.prompts || []).find(s => s.id === sceneId);
+              const prov = String(sc?.provider || "Veo3").toLowerCase();
+              if (prov.includes("muse") || prov.includes("grok")) { toast.warning("Video tham chiếu chỉ dùng cho cảnh Veo3 (model Omni Flash / Omni 1.2 Flash)."); continue; }
+              if (!/^video\/(mp4|quicktime|webm)$/.test(file.type)) { toast.warning(`${file.name}: chỉ nhận video MP4, MOV hoặc WebM.`); continue; }
+              if (file.size > 100 * 1024 * 1024) { toast.warning(`${file.name}: video tham chiếu phải nhỏ hơn 100 MB.`); continue; }
+              const vData = await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+              });
+              const vAsset = await assetsApi.importReference({ name: file.name, mimeType: file.type, dataUrl: vData });
+              if (!vAsset?.id) throw new Error("Không lưu được video tham chiếu.");
+              const vThumb = vAsset.thumbnailUrl || vAsset.url || "";
+              updateProject(projId, p => ({
+                ...p,
+                prompts: p.prompts.map(s => {
+                  if (s.id !== sceneId) return s;
+                  let ids = [...(s.referenceAssetIds || [])];
+                  let urls = Array.isArray(s.refImageUrls) ? [...s.refImageUrls] : (s.refImageUrl ? [s.refImageUrl] : []);
+                  const oldIdx = s.refVideoAssetId ? ids.indexOf(s.refVideoAssetId) : -1;
+                  if (oldIdx >= 0) { ids.splice(oldIdx, 1); urls.splice(oldIdx, 1); }
+                  ids.push(vAsset.id); urls.push(vThumb);
+                  return { ...s, referenceAssetIds: ids, refImageUrls: urls, refImageUrl: urls[0] || "", refVideoAssetId: vAsset.id };
+                })
+              }));
+              toast.success(`🎬 Đã nạp video tham chiếu: ${file.name}`);
+            } catch (vErr) {
+              toast.error("Không nạp được video tham chiếu: " + (vErr?.message || vErr));
+            }
+            continue;
+          }
           try {
             const dataUrl = await new Promise((resolve, reject) => {
               const reader = new FileReader();
@@ -1143,7 +1178,8 @@ export default function StoryScriptStudio() {
         const prevUrls = Array.isArray(s.refImageUrls) ? s.refImageUrls : (s.refImageUrl ? [s.refImageUrl] : []);
         const newUrls = prevUrls.filter((_, i) => i !== imgIdx);
         const newIds = (s.referenceAssetIds || []).filter((_, i) => i !== imgIdx);
-        return { ...s, refImageUrls: newUrls, referenceAssetIds: newIds, refImageUrl: newUrls[0] || "" };
+        const keepVid = s.refVideoAssetId && newIds.includes(s.refVideoAssetId) ? s.refVideoAssetId : undefined;
+        return { ...s, refImageUrls: newUrls, referenceAssetIds: newIds, refImageUrl: newUrls[0] || "", refVideoAssetId: keepVid };
       })
     }));
     toast.info("Đã xóa ảnh tham chiếu.");
@@ -1155,7 +1191,8 @@ export default function StoryScriptStudio() {
     handleUpdateScene(sceneId, {
       referenceAssetIds: [],
       refImageUrls: [],
-      refImageUrl: ""
+      refImageUrl: "",
+      refVideoAssetId: undefined
     });
     toast.info("Đã xóa tất cả ảnh tham chiếu của cảnh này.");
   };
@@ -1760,6 +1797,9 @@ export default function StoryScriptStudio() {
                           alt: `Ảnh ${imgIdx + 1}`,
                           className: "w-full h-full object-cover"
                         }),
+                        scene.refVideoAssetId && (scene.referenceAssetIds || [])[imgIdx] === scene.refVideoAssetId && React.createElement("div", {
+                          className: "absolute bottom-0 left-0 right-0 bg-violet-600/90 text-white text-[7px] font-bold text-center"
+                        }, "🎬 video"),
                         React.createElement("button", {
                           onClick: e => handleClearOneRefImage(scene.id, imgIdx, e),
                           title: "Xóa ảnh này",
@@ -1770,7 +1810,7 @@ export default function StoryScriptStudio() {
                     // Nút thêm ảnh
                     React.createElement("button", {
                       onClick: () => handlePickReferenceImage(scene.id),
-                      title: "Thêm ảnh tham chiếu (có thể chọn nhiều ảnh cùng lúc)",
+                      title: "Thêm ảnh tham chiếu (có thể chọn nhiều ảnh cùng lúc) — cảnh Veo3 nhận thêm 1 video tham chiếu (Omni Flash / Omni 1.2 Flash)",
                       className: "w-10 h-10 rounded-md border border-dashed border-white/20 bg-black/40 hover:border-violet-400 hover:bg-violet-500/10 flex items-center justify-center text-slate-500 hover:text-violet-300 transition-colors cursor-pointer text-xl shrink-0 font-light"
                     }, "+")
                   )

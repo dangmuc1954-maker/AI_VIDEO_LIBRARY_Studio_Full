@@ -1,0 +1,309 @@
+/*
+ * Tris yêu cầu 12/11/2026: giao diện Workflow gọn, dễ nhìn theo mẫu Tris gửi:
+ *  - nền tối chấm lưới, dây mảnh
+ *  - tên node nằm NGOÀI thẻ, phía trên (chữ nhỏ xám); nhãn nhà cung cấp (● Google Flow) nằm DƯỚI thẻ
+ *  - thẻ chỉ còn nội dung (ảnh/video phủ kín), bo góc, không viền; chọn node → viền xanh lá
+ *  - cổng: chấm tròn xám đậm, biểu tượng trắng, nằm ngoài mép thẻ
+ * CHỈ đổi giao diện — không đụng chức năng. Bỏ dòng <link> trong index.html là về giao diện cũ.
+ */
+
+/* ---------- Nền canvas ---------- */
+.workflow-react-flow {
+  --xy-background-color-default: #111113;
+  --xy-background-pattern-dots-color-default: #2a2a2e;
+  --xy-edge-stroke-default: #3d4a66;
+  background-color: #111113 !important;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px) !important;
+  background-size: 22px 22px !important;
+}
+
+/* ---------- Dây nối ---------- */
+.workflow-react-flow .react-flow__edge-path {
+  stroke-width: 1.6px;
+}
+.workflow-react-flow .react-flow__edge.selected .react-flow__edge-path,
+.workflow-react-flow .react-flow__edge:hover .react-flow__edge-path {
+  stroke: #4ade80 !important;
+}
+.workflow-react-flow .react-flow__connection-path {
+  stroke: #4ade80 !important;
+  stroke-width: 1.6px !important;
+}
+
+/* ---------- Thẻ node ---------- */
+.workflow-react-flow .workflow-node-card {
+  background: #1c1c1f !important;
+  border: 1.5px solid transparent !important;
+  border-radius: 12px !important;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.38) !important;
+  overflow: visible !important;
+}
+.workflow-react-flow .workflow-node-card:hover {
+  border-color: rgba(255, 255, 255, 0.14) !important;
+}
+.workflow-react-flow .react-flow__node.selected .workflow-node-card {
+  border-color: #22c55e !important;
+  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.25), 0 10px 30px rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Tên node: đưa ra NGOÀI, nằm phía trên thẻ */
+.workflow-react-flow .workflow-node-card > div[class~="border-b"] {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 100% !important;
+  margin-bottom: 4px !important;
+  padding: 0 2px !important;
+  border: none !important;
+  background: transparent !important;
+  min-height: 0 !important;
+  z-index: 5;
+}
+.workflow-react-flow .workflow-node-card > div[class~="border-b"] > span[aria-hidden="true"] {
+  display: none !important; /* vạch màu bên trái */
+}
+.workflow-react-flow .workflow-node-card > div[class~="border-b"] .w-\[24px\],
+.workflow-react-flow .workflow-node-card > div[class~="border-b"] .w-6 {
+  width: 15px !important;
+  height: 15px !important;
+  min-width: 15px !important;
+  border: none !important;
+  background: transparent !important;
+  color: #a1a1aa !important;
+}
+.workflow-react-flow .workflow-node-card > div[class~="border-b"] svg {
+  width: 12px !important;
+  height: 12px !important;
+  color: #a1a1aa !important;
+}
+.workflow-react-flow .workflow-node-card > div[class~="border-b"] input,
+.workflow-react-flow .workflow-node-card > div[class~="border-b"] span,
+.workflow-react-flow .workflow-node-card > div[class~="border-b"] div {
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  color: #d4d4d8 !important;
+  background-color: transparent;
+}
+/* Nút bật/tắt node vẫn giữ, chỉ thu nhỏ */
+.workflow-react-flow .workflow-node-card > div[class~="border-b"] button[role="switch"],
+.workflow-react-flow .workflow-node-card > div[class~="border-b"] button[aria-pressed] {
+  transform: scale(0.8);
+  transform-origin: right center;
+}
+
+/* Nội dung: ảnh/video phủ kín thẻ, bo góc */
+.workflow-react-flow .workflow-node-detail {
+  padding: 0 !important;
+  border-radius: 12px;
+}
+.workflow-react-flow .workflow-node-detail img,
+.workflow-react-flow .workflow-node-detail video {
+  border-radius: 11px;
+}
+.workflow-react-flow .workflow-node-detail > div[class*="rounded-lg"][class*="border"] {
+  border: none !important;
+  border-radius: 11px !important;
+  background: #1c1c1f !important;
+}
+
+/* Chân thẻ (thanh chọn model/tỉ lệ): trong suốt, nằm sát đáy */
+.workflow-react-flow .workflow-node-footer {
+  background: rgba(17, 17, 19, 0.55) !important;
+  border-top: none !important;
+  border-radius: 0 0 11px 11px !important;
+}
+
+/* Nhãn nhà cung cấp (● Google Flow): chuyển xuống DƯỚI thẻ, chữ nhỏ */
+.workflow-react-flow .workflow-provider-pill {
+  top: 100% !important;
+  bottom: auto !important;
+  margin-top: 6px !important;
+  margin-bottom: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  gap: 5px !important;
+}
+.workflow-react-flow .workflow-provider-pill > div:first-child {
+  width: 14px !important;
+  height: 14px !important;
+}
+.workflow-react-flow .workflow-provider-pill span {
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  color: #d4d4d8 !important;
+}
+
+/* ---------- Cổng: chấm tròn xám đậm, biểu tượng trắng, nằm ngoài mép thẻ ---------- */
+.workflow-react-flow .workflow-port-handle:not(.workflow-retry-source-handle) {
+  width: 26px !important;
+  height: 26px !important;
+  background: #2b2b2f !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4) !important;
+  color: #f4f4f5 !important;
+}
+.workflow-react-flow .workflow-port-handle[data-handlepos="left"]:not(.workflow-retry-source-handle),
+.workflow-react-flow .react-flow__handle-left.workflow-port-handle:not(.workflow-retry-source-handle) {
+  transform: translate(calc(-100% - 7px), -50%) !important;
+}
+.workflow-react-flow .workflow-port-handle[data-handlepos="right"]:not(.workflow-retry-source-handle),
+.workflow-react-flow .react-flow__handle-right.workflow-port-handle:not(.workflow-retry-source-handle) {
+  transform: translate(calc(100% + 7px), -50%) !important;
+}
+.workflow-react-flow .workflow-port-handle:not(.workflow-retry-source-handle) svg {
+  color: #f4f4f5 !important;
+  stroke: currentColor;
+  width: 13px !important;
+  height: 13px !important;
+}
+.workflow-react-flow .workflow-port-handle.is-selected:not(.workflow-retry-source-handle),
+.workflow-react-flow .workflow-port-handle:not(.workflow-retry-source-handle):hover {
+  background: #1f3a2a !important;
+  border-color: #22c55e !important;
+}
+
+/* ---------- Thanh công cụ dọc bên trái (theo mẫu) ---------- */
+.workflow-left-toolbar {
+  background: #1a1a1d !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border-radius: 999px !important;
+  padding: 6px 5px !important;
+  gap: 6px !important;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45) !important;
+  align-items: center !important;
+}
+.workflow-left-toolbar button {
+  width: 34px !important;
+  height: 34px !important;
+  border-radius: 999px !important;
+  color: #a1a1aa !important;
+}
+.workflow-left-toolbar button:hover {
+  background: #2a2a2e !important;
+  color: #f4f4f5 !important;
+}
+.workflow-left-toolbar button:disabled {
+  color: #52525b !important;
+}
+/* vạch ngăn giữa các nhóm nút */
+.workflow-left-toolbar > div[class*="h-px"],
+.workflow-left-toolbar > div[class*="border-t"] {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  width: 18px !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+/* Nút + : tròn to, vàng chanh */
+.workflow-left-toolbar .wf-tb-add {
+  width: 40px !important;
+  height: 40px !important;
+  background: #d9f224 !important;
+  color: #111113 !important;
+  box-shadow: 0 4px 14px rgba(217, 242, 36, 0.35) !important;
+}
+.workflow-left-toolbar .wf-tb-add:hover {
+  background: #e6fb4a !important;
+  color: #111113 !important;
+}
+.workflow-left-toolbar .wf-tb-add svg {
+  stroke-width: 2.6;
+}
+/* Nút chạy: tròn to, xanh lá (đang chạy → đỏ để dừng) */
+.workflow-left-toolbar .wf-tb-run {
+  width: 40px !important;
+  height: 40px !important;
+  background: #22c55e !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 14px rgba(34, 197, 94, 0.35) !important;
+}
+.workflow-left-toolbar .wf-tb-run:hover {
+  background: #2fd56b !important;
+  color: #ffffff !important;
+}
+.workflow-left-toolbar .wf-tb-run.is-running {
+  background: #ef4444 !important;
+  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.35) !important;
+}
+
+
+/* ---------- Cổng: cỡ & trạng thái (đè luật min-width 32px có sẵn) ---------- */
+.workflow-react-flow .react-flow__handle.workflow-port-handle:not(.workflow-retry-source-handle) {
+  min-width: 28px !important;
+  min-height: 28px !important;
+  width: 28px !important;
+  height: 28px !important;
+}
+.workflow-react-flow .workflow-port-handle.is-selected:not(.workflow-retry-source-handle) {
+  background: #2b2b2f !important;
+  border-color: rgba(255, 255, 255, 0.35) !important;
+}
+.workflow-react-flow .workflow-port-handle:not(.workflow-retry-source-handle):hover {
+  background: #1f3a2a !important;
+  border-color: #22c55e !important;
+}
+
+/* ---------- Thanh công cụ của node: viên tròn tối, nằm trên tên node, chỉ hiện khi rê chuột ---------- */
+.workflow-react-flow .workflow-node-action-bar {
+  top: -64px !important;
+  background: #1c1c1f !important;
+  border: 1px solid rgba(255, 255, 255, 0.09) !important;
+  border-radius: 999px !important;
+  padding: 5px 12px !important;
+  gap: 4px !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+.workflow-react-flow .react-flow__node:hover .workflow-node-action-bar,
+.workflow-react-flow .workflow-node-action-bar:hover {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+.workflow-react-flow .workflow-node-action-bar > button {
+  width: 28px !important;
+  height: 28px !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 999px !important;
+  color: #d4d4d8 !important;
+}
+.workflow-react-flow .workflow-node-action-bar > button:hover {
+  background: #2a2a2e !important;
+  color: #ffffff !important;
+}
+.workflow-react-flow .workflow-node-action-bar > div[aria-hidden="true"] {
+  top: 100% !important;
+  height: 24px !important; /* cầu nối để rê chuột từ node lên thanh không bị tắt */
+}
+
+/* ---------- Chân thẻ: hàng chọn Video/model/giây/tỉ lệ nằm ĐÈ ở đáy video ---------- */
+.workflow-react-flow .workflow-node-footer {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  height: 40px !important;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0)) !important;
+  border: none !important;
+  border-radius: 0 0 11px 11px !important;
+  z-index: 6;
+}
+.workflow-react-flow .workflow-node-footer button[data-workflow-footer-dropdown],
+.workflow-react-flow .workflow-node-footer [data-workflow-footer-dropdown] > button {
+  background: rgba(17, 17, 19, 0.85) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #f4f4f5 !important;
+  border-radius: 999px !important;
+}
+.workflow-react-flow .workflow-port-handle:not(.workflow-retry-source-handle) span {
+  color: #f4f4f5 !important;
+}
+.workflow-react-flow .workflow-node-card:hover .workflow-node-action-bar {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}

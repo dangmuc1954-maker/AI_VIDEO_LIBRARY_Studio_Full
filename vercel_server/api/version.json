@@ -1,9 +1,9 @@
 {
-  "version": "3.1.7",
-  "name": "AI VIDEO LIBRARY v3.1.7",
+  "version": "3.1.8",
+  "name": "AI VIDEO LIBRARY v3.1.8",
   "releaseDate": "2026-11-12",
-  "changelog": "ElevenLabs: tài khoản bị ElevenLabs khóa gói miễn phí không còn làm giọng đọc đứng chờ mãi — còn tài khoản khác thì tự chuyển, hết tài khoản dùng được thì dừng và báo rõ lý do.",
-  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.1.7/update-patch.zip",
+  "changelog": "Video tham chiếu cho Veo3 (Omni Flash / Omni 1.2 Flash) ở Studio Video, Studio Kịch Bản và Workflow, thời lượng tự lấy theo video. Workflow: node Video tham chiếu, cổng video tham chiếu, cổng Frame cuối cho mọi node tạo video, thêm Omni 1.2 Flash, giao diện mới gọn dễ nhìn. ElevenLabs: dùng API Key làm tài khoản, báo rõ lỗi giọng thư viện.",
+  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.1.8/update-patch.zip",
   "mandatory": false,
   "minVersion": "3.0.0"
 }
