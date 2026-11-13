@@ -3,6 +3,22 @@ const path = require('path');
 const https = require('https');
 const http = require('http');
 const { spawn, execSync } = require('child_process');
+// Tris 13/11/2026: ép ghi hết dữ liệu (localStorage, IndexedDB, cookies) của mọi phiên xuống đĩa trước khi thoát để cập nhật.
+async function __flushAllAppData() {
+  try {
+    const { session, webContents } = require('electron');
+    const seen = new Set();
+    const all = [session.defaultSession, ...webContents.getAllWebContents().map(w => w.session)];
+    for (const ses of all) {
+      if (!ses || seen.has(ses)) continue;
+      seen.add(ses);
+      try { ses.flushStorageData(); } catch (_) {}
+      try { await ses.cookies.flushStore(); } catch (_) {}
+    }
+  } catch (_) {}
+  await new Promise(r => setTimeout(r, 1500));
+}
+
 
 // Helper to parse semver string [major, minor, patch]
 function parseSemver(v) {
@@ -283,12 +299,14 @@ $zip       = '${zipPath.replace(/'/g, "''")}'
 $parentPid = ${currentPid}
 
 # 1. Doi tien trinh hien tai thoat han
-for ($i = 0; $i -lt 15; $i++) {
+# Doi app tu dong (da ghi xong du lieu) toi da 10s, qua han moi ep tat
+for ($i = 0; $i -lt 50; $i++) {
     $proc = Get-Process -Id $parentPid -ErrorAction SilentlyContinue
     if (-not $proc) { break }
-    Stop-Process -Id $parentPid -Force -ErrorAction SilentlyContinue
     Start-Sleep -Milliseconds 200
 }
+$proc = Get-Process -Id $parentPid -ErrorAction SilentlyContinue
+if ($proc) { Stop-Process -Id $parentPid -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 300 }
 
 # 2. Dong sach tat ca tien trinh AI VIDEO LIBRARY con sot lai de tranh lock file
 Get-Process -Name "AI VIDEO LIBRARY" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -323,13 +341,13 @@ Remove-Item -Path $zip, $srcDir -Recurse -Force -ErrorAction SilentlyContinue
       child.unref();
 
       // Exit immediately to release all open file locks
-      setTimeout(() => {
+      __flushAllAppData().finally(() => setTimeout(() => {
         try {
           app.exit(0);
         } catch (_) {
           process.exit(0);
         }
-      }, 300);
+      }, 300));
 
       return { ok: true, restarting: true };
     } else {
@@ -348,13 +366,13 @@ open "${exePath}"
         stdio: 'ignore'
       });
       child.unref();
-      setTimeout(() => {
+      __flushAllAppData().finally(() => setTimeout(() => {
         try {
           app.exit(0);
         } catch (_) {
           process.exit(0);
         }
-      }, 300);
+      }, 300));
 
       return { ok: true, restarting: true };
     }

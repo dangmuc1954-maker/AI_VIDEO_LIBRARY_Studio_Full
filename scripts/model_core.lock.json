@@ -1,10 +1,10 @@
 {
   "files": {
-    "app/out/main/index.js": "32b31ee6f6b758a0a76345029b9eb0db038e280345e669bd7571f05c81783f99",
+    "app/out/main/index.js": "b5971d3aaeeda6f8f35b8c12ae6dba9f28a475cd1e0ac3231350db3e00c485e5",
     "app/out/main/google_flow_native_transport.cjs": "da661f7c71987b70fdff57fd664803bf5d2ab74b66d01633f19e88572bd2d90b",
     "app/out/preload/index.cjs": "beda24188b3361997dddf3275bdc4483dc89a049cc389c544460cfcdb690e8bc",
     "app/out/renderer/assets/useWorkflowRunner-DGw6Ekx4.js": "3f437eff47f99fb49df39e48e0a549048befd8e2bd7e9d6a90bbf533c7a84304",
-    "app/out/renderer/assets/VideoStudio-frcr8V6s.js": "8419ff3f7b92377cd51be953ffc8e4ee0c18986538d5b778b599653b2558aba5",
+    "app/out/renderer/assets/VideoStudio-frcr8V6s.js": "18c9e8050f3f0377d00e37b8a46f249273367b13435356b1d05a274eb47b91ab",
     "app/out/renderer/assets/ImageStudio-4nmpUX3j.js": "936636d351a49fa7571dd49519f1df6d6f625b611bb36dcbcc74bbdd52a85af3",
     "app/out/renderer/assets/StudioFailedBulkActions-Zv2NpUPy.js": "f4a9d7d6389f209fbb6b7f6c609a35691d8f17ba7b72b24c4ffb09b818350a82",
     "app/out/renderer/assets/index-BS7vgKVV.js": "7d960921a6df9ffcce35e34f5677abefb0ca3c67b524f208d6b5ae5fd7492fd5"
@@ -45,6 +45,10 @@
     {
       "at": "2026-11-12T17:11:20.149Z",
       "reason": "Tris duyệt 13/11/2026: xóa dấu ✦ Veo bằng tính ngược độ trong suốt (veo_sparkle_remover) chạy trước bộ xóa cũ; workflow ô giây Auto khi có video tham chiếu; hiệu ứng LED node đang chạy"
+    },
+    {
+      "at": "2026-11-13T07:02:31.470Z",
+      "reason": "Tris duyệt 13/11/2026: Biên tập video Studio Kịch Bản lưu theo thư mục riêng từng dự án; lỗi ffmpeg giữ phần cuối nhật ký + báo hết dung lượng ổ"
     }
   ]
 }

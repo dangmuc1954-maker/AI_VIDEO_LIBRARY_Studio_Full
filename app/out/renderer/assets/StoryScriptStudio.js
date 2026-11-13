@@ -2047,6 +2047,8 @@ export default function StoryScriptStudio() {
       isOpen: true,
       initialAssetIds: mergeEditorAssetIds,
       allowedAssetIds: mergeEditorAssetIds,
+      saveDirectory: currentProject?.saveDirectory || "",
+      onSaveDirectoryChange: dir => { if (currentProject?.id) updateProject(currentProject.id, { saveDirectory: dir }); },
       onClose: () => setMergeEditorAssetIds(null)
     }),
 

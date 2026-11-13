@@ -1,9 +1,9 @@
 {
-  "version": "3.2.0",
-  "name": "AI VIDEO LIBRARY v3.2.0",
-  "releaseDate": "2026-11-12",
-  "changelog": "Workflow: viền LED chạy vòng quanh node khi đang tạo, trong node hiện thời gian chạy và % tiến độ.",
-  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.2.0/update-patch.zip",
+  "version": "3.2.1",
+  "name": "AI VIDEO LIBRARY v3.2.1",
+  "releaseDate": "2026-11-13",
+  "changelog": "Studio Kịch Bản: Biên tập video lưu đúng thư mục riêng từng dự án; ghép video lỗi báo rõ nguyên nhân (ví dụ ổ đĩa hết dung lượng). Workflow: nút Tải về trên node cho chọn thư mục lưu trên máy. Cập nhật online giữ an toàn dữ liệu đang làm dở.",
+  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.2.1/update-patch.zip",
   "mandatory": false,
   "minVersion": "3.0.0"
 }
