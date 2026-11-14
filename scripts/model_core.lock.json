@@ -1,6 +1,6 @@
 {
   "files": {
-    "app/out/main/index.js": "b5971d3aaeeda6f8f35b8c12ae6dba9f28a475cd1e0ac3231350db3e00c485e5",
+    "app/out/main/index.js": "4bfc521c2031ddd3fbea862d173e0cb945675a133ef6557dab4bb4ec1615ac83",
     "app/out/main/google_flow_native_transport.cjs": "da661f7c71987b70fdff57fd664803bf5d2ab74b66d01633f19e88572bd2d90b",
     "app/out/preload/index.cjs": "beda24188b3361997dddf3275bdc4483dc89a049cc389c544460cfcdb690e8bc",
     "app/out/renderer/assets/useWorkflowRunner-DGw6Ekx4.js": "3f437eff47f99fb49df39e48e0a549048befd8e2bd7e9d6a90bbf533c7a84304",
@@ -49,6 +49,10 @@
     {
       "at": "2026-11-13T07:02:31.470Z",
       "reason": "Tris duyệt 13/11/2026: Biên tập video Studio Kịch Bản lưu theo thư mục riêng từng dự án; lỗi ffmpeg giữ phần cuối nhật ký + báo hết dung lượng ổ"
+    },
+    {
+      "at": "2026-11-14T13:41:00.364Z",
+      "reason": "Tris duyệt 14/11/2026: Muse AI không bấm nhầm ô chọn file (hết bật hộp Open trên máy khách)"
     }
   ]
 }

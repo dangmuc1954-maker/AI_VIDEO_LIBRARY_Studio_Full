@@ -3074,7 +3074,7 @@ class MuseVideoRuntime {
                     fi.dispatchEvent(new Event('change', { bubbles: true }));
                   }
 
-                  const chatEl = document.querySelector('textarea, div[contenteditable="true"], [role="textbox"], input');
+                  const chatEl = document.querySelector('textarea, div[contenteditable="true"], [role="textbox"], input:not([type="file"]):not([type="hidden"])');
                   if (chatEl) {
                     chatEl.focus();
                     chatEl.dispatchEvent(new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt }));
@@ -3093,7 +3093,7 @@ class MuseVideoRuntime {
               wc.focus();
               await wc.executeJavaScript(`
                 (() => {
-                  const el = document.querySelector('textarea, div[contenteditable="true"], [role="textbox"], input');
+                  const el = document.querySelector('textarea, div[contenteditable="true"], [role="textbox"], input:not([type="file"]):not([type="hidden"])');
                   if (el) { el.focus(); el.click(); }
                 })()
               `, true);
@@ -3186,7 +3186,7 @@ class MuseVideoRuntime {
                 try { pills[0].click(); } catch(e) {}
               }
 
-              const all = Array.from(document.querySelectorAll('textarea, div[contenteditable="true"], [role="textbox"], input')).filter(el => {
+              const all = Array.from(document.querySelectorAll('textarea, div[contenteditable="true"], [role="textbox"], input:not([type="file"]):not([type="hidden"])')).filter(el => {
                 if (el.disabled || el.readOnly || el.offsetWidth <= 0 || el.offsetHeight <= 0) return false;
                 const rect = el.getBoundingClientRect();
                 if (rect.left < 200 && rect.width < 120) return false;
