@@ -1,13 +1,13 @@
 {
   "files": {
-    "app/out/main/index.js": "4bfc521c2031ddd3fbea862d173e0cb945675a133ef6557dab4bb4ec1615ac83",
+    "app/out/main/index.js": "3a023f53a13b18dbeddd87d3e939bb42f5f9172ec759a5c84719775be0aa8909",
     "app/out/main/google_flow_native_transport.cjs": "da661f7c71987b70fdff57fd664803bf5d2ab74b66d01633f19e88572bd2d90b",
     "app/out/preload/index.cjs": "beda24188b3361997dddf3275bdc4483dc89a049cc389c544460cfcdb690e8bc",
     "app/out/renderer/assets/useWorkflowRunner-DGw6Ekx4.js": "3f437eff47f99fb49df39e48e0a549048befd8e2bd7e9d6a90bbf533c7a84304",
     "app/out/renderer/assets/VideoStudio-frcr8V6s.js": "18c9e8050f3f0377d00e37b8a46f249273367b13435356b1d05a274eb47b91ab",
     "app/out/renderer/assets/ImageStudio-4nmpUX3j.js": "936636d351a49fa7571dd49519f1df6d6f625b611bb36dcbcc74bbdd52a85af3",
     "app/out/renderer/assets/StudioFailedBulkActions-Zv2NpUPy.js": "f4a9d7d6389f209fbb6b7f6c609a35691d8f17ba7b72b24c4ffb09b818350a82",
-    "app/out/renderer/assets/index-BS7vgKVV.js": "7d960921a6df9ffcce35e34f5677abefb0ca3c67b524f208d6b5ae5fd7492fd5"
+    "app/out/renderer/assets/index-BS7vgKVV.js": "982180a6b82bf1422a0cb6c9ee01eb569de8b9ea953e782ed8cf730f08f17407"
   },
   "history": [
     {
@@ -53,6 +53,10 @@
     {
       "at": "2026-11-14T13:41:00.364Z",
       "reason": "Tris duyệt 14/11/2026: Muse AI không bấm nhầm ô chọn file (hết bật hộp Open trên máy khách)"
+    },
+    {
+      "at": "2026-11-18T08:11:09.807Z",
+      "reason": "Tris duyệt: thêm mức 15s cho Omni 1.2 Flash (macaron_cookie_*_15s, 720p=60, 360p=20 tín dụng)"
     }
   ]
 }
