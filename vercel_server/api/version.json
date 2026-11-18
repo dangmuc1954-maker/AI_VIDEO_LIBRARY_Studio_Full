@@ -1,9 +1,9 @@
 {
-  "version": "3.2.3",
-  "name": "AI VIDEO LIBRARY v3.2.3",
+  "version": "3.2.4",
+  "name": "AI VIDEO LIBRARY v3.2.4",
   "releaseDate": "2026-11-18",
-  "changelog": "Omni 1.2 Flash: thêm thời lượng 15s (720p 60 tín dụng, 360p 20 tín dụng) ở Studio Video, Studio Kịch Bản và Workflow.",
-  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.2.3/update-patch.zip",
+  "changelog": "Sửa lỗi cập nhật online trên MacBook bị đứng ở bước Đang nâng cấp & khởi động lại. Bao gồm Omni 1.2 Flash thêm thời lượng 15s.",
+  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.2.4/update-patch.zip",
   "mandatory": false,
   "minVersion": "3.0.0"
 }

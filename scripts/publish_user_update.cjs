@@ -86,8 +86,22 @@ if (fs.existsSync(patchZip)) {
   try { fs.unlinkSync(patchZip); } catch (_) {}
 }
 
-const psZip = `powershell -NoProfile -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; [System.IO.Compression.ZipFile]::CreateFromDirectory('${stagingDir.replace(/'/g, "''")}', '${patchZip.replace(/'/g, "''")}', [System.IO.Compression.CompressionLevel]::Optimal, $false)"`;
-execSync(psZip, { stdio: 'inherit' });
+// Nén bằng tar (bsdtar) để tên file trong zip dùng dấu "/" chuẩn.
+// PowerShell ZipFile cũ ghi dấu "\" -> unzip trên Mac báo lỗi, cập nhật Mac bị đứng.
+const winTar = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
+// tar.exe không đọc được đường dẫn có dấu tiếng Việt -> nén trong thư mục tạm không dấu rồi chép về dist/
+{
+  const tmpZipDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'aivl_patch_'));
+  const tmpStaging = path.join(tmpZipDir, 'staging');
+  const tmpZip = path.join(tmpZipDir, 'update-patch.zip');
+  copyDirRecursive(stagingDir, tmpStaging);
+  execSync(`"${winTar}" -a -c -f "${tmpZip}" out package.json`, { stdio: 'inherit', cwd: tmpStaging });
+  const listing = execSync(`"${winTar}" -tf "${tmpZip}"`, { encoding: 'utf8' });
+  if (listing.includes('\\')) throw new Error('update-patch.zip còn đường dẫn dùng dấu "\\" - Mac sẽ không cập nhật được');
+  if (!/^out\/main\/index\.js$/m.test(listing) || !/^package\.json$/m.test(listing)) throw new Error('update-patch.zip thiếu out/main/index.js hoặc package.json');
+  fs.copyFileSync(tmpZip, patchZip);
+  fs.rmSync(tmpZipDir, { recursive: true, force: true });
+}
 
 const patchSizeMb = (fs.statSync(patchZip).size / 1024 / 1024).toFixed(2);
 console.log(`✅ Đã đóng gói thành công bản vá: update-patch.zip (${patchSizeMb} MB)`);

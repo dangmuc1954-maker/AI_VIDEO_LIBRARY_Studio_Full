@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const http = require('http');
-const { spawn, execSync } = require('child_process');
+const { spawn, spawnSync, execSync } = require('child_process');
 // Tris 13/11/2026: ép ghi hết dữ liệu (localStorage, IndexedDB, cookies) của mọi phiên xuống đĩa trước khi thoát để cập nhật.
 async function __flushAllAppData() {
   try {
@@ -352,12 +352,33 @@ Remove-Item -Path $zip, $srcDir -Recurse -Force -ErrorAction SilentlyContinue
       return { ok: true, restarting: true };
     } else {
       // macOS / Linux
-      execSync(`unzip -o "${zipPath}" -d "${extractedDir}"`, { stdio: 'ignore' });
+      // unzip trả mã 1 khi chỉ có cảnh báo (vd: bản vá nén trên Windows dùng dấu "\")
+      // -> vẫn giải nén đủ, không được coi là lỗi. Chỉ mã >= 2 mới là lỗi thật.
+      const unz = spawnSync('unzip', ['-o', '-q', zipPath, '-d', extractedDir], { stdio: 'ignore' });
+      if (unz.error || (unz.status !== 0 && unz.status !== 1)) {
+        throw new Error('Không giải nén được bản cập nhật trên Mac (unzip mã ' + (unz.status ?? unz.error?.message) + ')');
+      }
+      if (!fs.existsSync(path.join(extractedDir, 'out')) && !fs.existsSync(path.join(extractedDir, 'package.json'))) {
+        throw new Error('Bản cập nhật giải nén ra không đúng cấu trúc (thiếu out/)');
+      }
+      // Mở lại đúng gói .app (open trên file thực thi bên trong sẽ bật Terminal)
+      const appBundleMatch = exePath.match(/^(.*?\.app)(\/|$)/);
+      const appBundle = appBundleMatch ? appBundleMatch[1] : '';
+      const logPath = path.join(tempDir, 'apply_update.log');
+      const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
       const shPath = path.join(tempDir, 'apply_update.sh');
       const shContent = `#!/bin/bash
-sleep 1
-cp -R "${extractedDir}/"* "${targetAppDir}/"
-open "${exePath}"
+exec >>${q(logPath)} 2>&1
+echo "=== $(date) apply update"
+# Đợi app cũ thoát hẳn (đã ghi xong dữ liệu), tối đa 15s rồi mới ép tắt
+for i in $(seq 1 75); do kill -0 ${currentPid} 2>/dev/null || break; sleep 0.2; done
+kill -0 ${currentPid} 2>/dev/null && { kill -9 ${currentPid} 2>/dev/null; sleep 0.5; }
+cp -Rf ${q(extractedDir)}/. ${q(targetAppDir)}/ || echo "cp lỗi: $?"
+${appBundle ? `xattr -dr com.apple.quarantine ${q(appBundle)} 2>/dev/null || true` : ''}
+sleep 0.5
+${appBundle ? `open -n ${q(appBundle)} || ${q(exePath)} &` : `${q(exePath)} &`}
+sleep 3
+rm -rf ${q(extractedDir)} ${q(zipPath)}
 `;
       fs.writeFileSync(shPath, shContent, { mode: 0o755 });
 
