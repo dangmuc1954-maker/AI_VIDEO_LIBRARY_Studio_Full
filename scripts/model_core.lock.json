@@ -1,8 +1,8 @@
 {
   "files": {
-    "app/out/main/index.js": "3a023f53a13b18dbeddd87d3e939bb42f5f9172ec759a5c84719775be0aa8909",
+    "app/out/main/index.js": "e01745f63bc077ffca87ebf5958a1793a3035819c781d6d0a210a062ea66637c",
     "app/out/main/google_flow_native_transport.cjs": "da661f7c71987b70fdff57fd664803bf5d2ab74b66d01633f19e88572bd2d90b",
-    "app/out/preload/index.cjs": "beda24188b3361997dddf3275bdc4483dc89a049cc389c544460cfcdb690e8bc",
+    "app/out/preload/index.cjs": "323abedca7ec609014350157ebb7ded49b9af160461cb8de26875ffc9a66bd4d",
     "app/out/renderer/assets/useWorkflowRunner-DGw6Ekx4.js": "3f437eff47f99fb49df39e48e0a549048befd8e2bd7e9d6a90bbf533c7a84304",
     "app/out/renderer/assets/VideoStudio-frcr8V6s.js": "18c9e8050f3f0377d00e37b8a46f249273367b13435356b1d05a274eb47b91ab",
     "app/out/renderer/assets/ImageStudio-4nmpUX3j.js": "936636d351a49fa7571dd49519f1df6d6f625b611bb36dcbcc74bbdd52a85af3",
@@ -57,6 +57,10 @@
     {
       "at": "2026-11-18T08:11:09.807Z",
       "reason": "Tris duyệt: thêm mức 15s cho Omni 1.2 Flash (macaron_cookie_*_15s, 720p=60, 360p=20 tín dụng)"
+    },
+    {
+      "at": "2026-11-19T10:37:08.666Z",
+      "reason": "Tris duyệt: VPN Mỹ riêng cho Muse AI (muse_vpn.cjs) - nạp module trong MB(), gọi trước loadUrl, trước cửa sổ job Muse; preload thêm museVpn"
     }
   ]
 }
