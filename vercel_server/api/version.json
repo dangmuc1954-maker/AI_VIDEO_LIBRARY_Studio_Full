@@ -1,9 +1,9 @@
 {
-  "version": "3.2.7",
-  "name": "AI VIDEO LIBRARY v3.2.7",
+  "version": "3.2.8",
+  "name": "AI VIDEO LIBRARY v3.2.8",
   "releaseDate": "2026-11-20",
-  "changelog": "Video tham chiếu Veo3: Omni 1.2 Flash tối đa 15 giây theo độ dài video tham chiếu (Omni Flash 1.1 tối đa 10 giây). Áp dụng cho Studio Video, Studio Kịch Bản và Workflow.",
-  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.2.7/update-patch.zip",
+  "changelog": "Studio Kịch Bản: cảnh nào tạo lỗi sẽ tự tạo lại tối đa 3 lần (cách nhau 5 giây) rồi chạy tiếp dây chuyền; quá 3 lần vẫn lỗi mới dừng chờ người dùng xem lỗi.",
+  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.2.8/update-patch.zip",
   "mandatory": false,
   "minVersion": "3.0.0"
 }

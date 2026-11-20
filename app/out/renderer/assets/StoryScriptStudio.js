@@ -170,6 +170,34 @@ const storyMerging = new Set();
 const storyPauseRequested = new Set();
 const STORY_RESTART_FROM_START = "__from_start__";
 const STORY_RESET_ONLY = "__reset_only__";
+// Tự tạo lại cảnh lỗi: mỗi cảnh tối đa 3 lần, quá 3 lần mới dừng chờ người dùng
+const STORY_AUTO_RETRY_MAX = 3;
+const STORY_AUTO_RETRY_DELAY_MS = 5000;
+const storyAutoRetry = new Map(); // "projId|sceneId" -> số lần đã tự tạo lại
+function clearStoryAutoRetry(projId) {
+  for (const k of [...storyAutoRetry.keys()]) if (k.startsWith(projId + "|")) storyAutoRetry.delete(k);
+}
+// Đặt lại cảnh lỗi (không hỏi xác nhận) rồi chạy dây chuyền tiếp từ cảnh đó
+function autoRetryStoryScene(projId, sceneId) {
+  if (storyLoopAlive.has(projId) || runningProjects.has(projId)) return; // người dùng đã tự bấm chạy
+  const proj = StoryStore.getState().projects.find(p => p.id === projId);
+  if (!proj) return;
+  const k = proj.prompts.findIndex(s => s.id === sceneId);
+  if (k < 0 || !proj.prompts[k].autoRetrying || proj.prompts[k].status !== "Failed") return; // người dùng đã sửa / xóa / tạo lại tay
+  const tailIdx = new Set(proj.prompts.slice(k).map(s => s.index));
+  const now = Date.now();
+  StoryStore.updateProject(projId, p => ({
+    ...p,
+    completedMovie: null,
+    completedVideos: (p.completedVideos || []).filter(v => !tailIdx.has(v.sceneNum)),
+    sceneResetAt: { ...(p.sceneResetAt || {}), ...Object.fromEntries([...tailIdx].map(i => [i, now])) },
+    prompts: p.prompts.map((s, j) => j < k ? s : {
+      ...s, status: "Pending", progress: 0, videoUrl: "", assetId: null, autoRetrying: false,
+      ...(j > k ? { lastExtractedFrameUrl: "", lastExtractedFrameAssetId: null, error: "" } : {})
+    })
+  }));
+  runStoryProjectCore(projId, { resumeFromSceneId: sceneId });
+}
 
 // Tạm dừng: không hủy cảnh đang tạo, chỉ không gửi cảnh kế tiếp → sửa / thêm prompt thoải mái
 function pauseStoryProject(projId) {
@@ -266,6 +294,7 @@ function getLiveScenes(projId) {
 function regenerateStoryScene(projId, sceneId) {
   const proj = StoryStore.getState().projects.find(p => p.id === projId);
   if (!proj) return;
+  clearStoryAutoRetry(projId);
   const k = proj.prompts.findIndex(s => s.id === sceneId);
   if (k < 0) return;
   const tail = proj.prompts.slice(k);
@@ -438,6 +467,8 @@ async function runStoryProjectCore(projId, options = {}) {
   } catch (_) {}
 
   const newCompletedVideos = [];
+  let __runningSceneId = null; // cảnh đang chạy (để tự tạo lại đúng cảnh khi lỗi)
+  let __autoRetrySceneId = null;
 
   try {
     // Tạo lại giữa chừng: lấy frame cuối của ĐÚNG cảnh liền trước (trích lại từ video cảnh đó),
@@ -480,6 +511,7 @@ async function runStoryProjectCore(projId, options = {}) {
       if (i < 0) break;
       const curScene = liveList[i];
       const sceneNum = curScene.index || (i + 1);
+      __runningSceneId = curScene.id;
 
       updateProject(projId, p => ({
         ...p,
@@ -751,6 +783,7 @@ async function runStoryProjectCore(projId, options = {}) {
       }
 
       doneCount++;
+      storyAutoRetry.delete(projId + "|" + curScene.id);
       // Cảnh kế tiếp lấy từ danh sách MỚI NHẤT (kể cả prompt vừa thêm trong lúc chạy)
       const nextList = getLiveScenes(projId);
       const pos = nextList.findIndex(s => s.id === curScene.id);
@@ -774,11 +807,29 @@ async function runStoryProjectCore(projId, options = {}) {
       // KHÔNG dừng hẳn toàn bộ dự án — chuyển cảnh lỗi sang trạng thái CHỜ TẠO LẠI,
       // giữ nguyên toàn bộ cảnh đã hoàn tất để người dùng bấm "Tạo lại" tiếp tục dây chuyền.
       console.error("[StoryScriptRunner Error]:", err);
-      toast.error(`⚠️ [${proj.name}] Một cảnh gặp sự cố — dây chuyền đang CHỜ. Bấm "Tạo lại" ở cảnh lỗi để tiếp tục tự động: ` + errMsg);
-      updateProject(projId, p => ({
-        ...p,
-        prompts: p.prompts.map(s => s.status === "Running" ? { ...s, status: "Failed", progress: 0, error: errMsg } : s)
-      }));
+      const __failId = __runningSceneId;
+      const __failScene = __failId ? (StoryStore.getState().projects.find(p => p.id === projId)?.prompts || []).find(s => s.id === __failId) : null;
+      const __key = projId + "|" + __failId;
+      const __tries = (storyAutoRetry.get(__key) || 0) + 1;
+      if (__failId && __tries <= STORY_AUTO_RETRY_MAX && !storyPendingRestart.has(projId)) {
+        storyAutoRetry.set(__key, __tries);
+        __autoRetrySceneId = __failId;
+        toast.info(`🔁 [${proj.name}] Cảnh ${__failScene?.index ?? ""} lỗi — tự tạo lại lần ${__tries}/${STORY_AUTO_RETRY_MAX} sau ${STORY_AUTO_RETRY_DELAY_MS / 1000} giây. (Lỗi: ${errMsg.slice(0, 160)})`);
+        updateProject(projId, p => ({
+          ...p,
+          prompts: p.prompts.map(s => s.id === __failId || s.status === "Running"
+            ? { ...s, status: "Failed", progress: 0, autoRetrying: s.id === __failId, error: `Đang tự tạo lại lần ${__tries}/${STORY_AUTO_RETRY_MAX}... (Lỗi: ${errMsg})` }
+            : s)
+        }));
+      } else {
+        const __gaveUp = __failId && __tries > STORY_AUTO_RETRY_MAX;
+        storyAutoRetry.delete(__key);
+        toast.error(`⚠️ [${proj.name}] ${__gaveUp ? `Cảnh ${__failScene?.index ?? ""} đã tự tạo lại ${STORY_AUTO_RETRY_MAX} lần vẫn lỗi` : "Một cảnh gặp sự cố"} — dây chuyền đang CHỜ. Bấm "Tạo lại" ở cảnh lỗi để tiếp tục tự động: ` + errMsg);
+        updateProject(projId, p => ({
+          ...p,
+          prompts: p.prompts.map(s => s.status === "Running" || s.id === __failId ? { ...s, status: "Failed", progress: 0, autoRetrying: false, error: errMsg } : s)
+        }));
+      }
     }
   } finally {
     runningRef.current.delete(projId);
@@ -793,6 +844,9 @@ async function runStoryProjectCore(projId, options = {}) {
       if (restartId !== STORY_RESET_ONLY) setTimeout(() => restartId === STORY_RESTART_FROM_START
         ? runStoryProjectCore(projId)
         : runStoryProjectCore(projId, { resumeFromSceneId: restartId }), 300);
+    } else if (__autoRetrySceneId) {
+      const __sid = __autoRetrySceneId;
+      setTimeout(() => autoRetryStoryScene(projId, __sid), STORY_AUTO_RETRY_DELAY_MS);
     }
   }
 }
