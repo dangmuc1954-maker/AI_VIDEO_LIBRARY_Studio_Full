@@ -37,6 +37,14 @@ console.log('[*] Đang sao chép nhân Electron macOS ARM64 & x64...');
 fs.copyFileSync(arm64Zip, path.join(binariesDir, 'electron_arm64.zip'));
 fs.copyFileSync(x64Zip, path.join(binariesDir, 'electron_x64.zip'));
 
+// 2b. ffmpeg bản Mac (bộ cài đóng gói trên Windows chỉ có ffmpeg.exe -> Mac lỗi ENOEXEC)
+console.log('[*] Đang sao chép ffmpeg macOS ARM64 & x64...');
+for (const a of ['arm64', 'x64']) {
+  const src = path.join(rootDir, 'tools', 'mac-ffmpeg', `ffmpeg-darwin-${a}.gz`);
+  if (!fs.existsSync(src)) throw new Error('Thiếu ' + src + ' - bản Mac sẽ không có ffmpeg');
+  fs.copyFileSync(src, path.join(binariesDir, `ffmpeg-darwin-${a}.gz`));
+}
+
 // 3. Chuẩn bị file Icon Apple .icns
 console.log('[*] Đang tạo bộ icon chất lượng cao Apple ICNS...');
 const pngSrc = path.join(rootDir, 'dist/AI_VIDEO_LIBRARY_Customer_Edition/app-icon.png');
@@ -168,6 +176,13 @@ cp -f ".core/payload/electron.icns" "$DEST_APP/Contents/Resources/electron.icns"
 echo "[*] Đang cài đặt tài nguyên và cơ sở dữ liệu AI VIDEO LIBRARY..."
 mkdir -p "$DEST_APP/Contents/Resources/app"
 unzip -q -o ".core/payload/app_payload.zip" -d "$DEST_APP/Contents/Resources/app"
+
+# ffmpeg đúng chip Mac (thay cho ffmpeg.exe của Windows)
+FF_DIR="$DEST_APP/Contents/Resources/app/node_modules/ffmpeg-static"
+mkdir -p "$FF_DIR"
+if [ "$ARCH" = "arm64" ]; then FF_GZ=".core/binaries/ffmpeg-darwin-arm64.gz"; else FF_GZ=".core/binaries/ffmpeg-darwin-x64.gz"; fi
+gunzip -c "$FF_GZ" > "$FF_DIR/ffmpeg" && chmod +x "$FF_DIR/ffmpeg" && rm -f "$FF_DIR/ffmpeg.exe"
+echo "[✓] Đã cài ffmpeg cho Mac"
 
 # Dọn dẹp default_app.asar cũ nếu có
 rm -f "$DEST_APP/Contents/Resources/default_app.asar"

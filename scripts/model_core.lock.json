@@ -1,6 +1,6 @@
 {
   "files": {
-    "app/out/main/index.js": "e01745f63bc077ffca87ebf5958a1793a3035819c781d6d0a210a062ea66637c",
+    "app/out/main/index.js": "e2cd96241b8ad2ca81da486ecdf99b266e5cf8d11b31ba142cc182c5ba5e5d04",
     "app/out/main/google_flow_native_transport.cjs": "da661f7c71987b70fdff57fd664803bf5d2ab74b66d01633f19e88572bd2d90b",
     "app/out/preload/index.cjs": "323abedca7ec609014350157ebb7ded49b9af160461cb8de26875ffc9a66bd4d",
     "app/out/renderer/assets/useWorkflowRunner-DGw6Ekx4.js": "3f437eff47f99fb49df39e48e0a549048befd8e2bd7e9d6a90bbf533c7a84304",
@@ -61,6 +61,14 @@
     {
       "at": "2026-11-19T10:37:08.666Z",
       "reason": "Tris duyệt: VPN Mỹ riêng cho Muse AI (muse_vpn.cjs) - nạp module trong MB(), gọi trước loadUrl, trước cửa sổ job Muse; preload thêm museVpn"
+    },
+    {
+      "at": "2026-11-19T16:57:30.434Z",
+      "reason": "Tris duyệt: video tham chiếu Flow đọc độ dài từ file trên máy khi Flow không trả độ dài (trước đó rơi về 8s)"
+    },
+    {
+      "at": "2026-11-20T04:33:48.842Z",
+      "reason": "Tris duyệt: Mac tự cài ffmpeg đúng chip (mac_ffmpeg.cjs) - nạp trong MB(), lấy frame cuối chờ ffmpeg sẵn sàng"
     }
   ]
 }

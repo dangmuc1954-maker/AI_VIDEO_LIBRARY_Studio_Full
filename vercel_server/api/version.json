@@ -1,9 +1,9 @@
 {
-  "version": "3.2.5",
-  "name": "AI VIDEO LIBRARY v3.2.5",
-  "releaseDate": "2026-11-19",
-  "changelog": "Muse AI: thêm VPN Mỹ riêng cho tài khoản Muse trong Browser Hub (dùng file WireGuard của Proton VPN), các model khác giữ mạng thường.",
-  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.2.5/update-patch.zip",
+  "version": "3.2.6",
+  "name": "AI VIDEO LIBRARY v3.2.6",
+  "releaseDate": "2026-11-20",
+  "changelog": "Sửa lỗi MacBook: Studio Kịch Bản chỉ tạo được cảnh đầu, không nối được cảnh sau (thiếu ffmpeg cho Mac); ghép video, xóa watermark trên Mac chạy lại bình thường. Video tham chiếu Veo3 (Omni) ra đúng thời lượng theo video tham chiếu (tối đa 10s), hết lỗi luôn ra 8s.",
+  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.2.6/update-patch.zip",
   "mandatory": false,
   "minVersion": "3.0.0"
 }

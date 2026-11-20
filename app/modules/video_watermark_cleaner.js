@@ -29,7 +29,9 @@ class VideoWatermarkCleaner {
       'C:/Users/admin/AppData/Local/Programs/AI VIDEO LIBRARY/resources/app/node_modules/ffmpeg-static/ffmpeg.exe'
     ];
 
-    for (const c of candidates) {
+    // Mac/Linux: không bao giờ chạy ffmpeg.exe của Windows (lỗi ENOEXEC)
+    const __cands = process.platform === 'win32' ? candidates : [...candidates.map(x => x && x.replace(/ffmpeg.exe$/, 'ffmpeg')), '/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg'];
+    for (const c of __cands) {
       if (c && fs.existsSync(c)) return c;
     }
 
