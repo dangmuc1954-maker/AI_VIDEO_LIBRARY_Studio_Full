@@ -1,9 +1,9 @@
 {
-  "version": "3.2.9",
-  "name": "AI VIDEO LIBRARY v3.2.9",
+  "version": "3.3.0",
+  "name": "AI VIDEO LIBRARY v3.3.0",
   "releaseDate": "2026-11-20",
-  "changelog": "Studio Kịch Bản: thêm ô bật/tắt Xóa watermark (WM) và tự upscale 1080p cho từng cảnh Veo3 (Google Flow); Omni 1.2 Flash chọn được thời lượng 15 giây.",
-  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.2.9/update-patch.zip",
+  "changelog": "Studio Kịch Bản: thu gọn hàng chọn của mỗi cảnh (nền tảng, model, tỷ lệ, thời lượng, WM, 1080p) nằm gọn trên một hàng.",
+  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.3.0/update-patch.zip",
   "mandatory": false,
   "minVersion": "3.0.0"
 }

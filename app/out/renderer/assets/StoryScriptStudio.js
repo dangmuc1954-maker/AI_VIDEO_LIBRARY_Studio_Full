@@ -1949,7 +1949,7 @@ export default function StoryScriptStudio() {
                 ),
 
                 // Cột 4: Nền tảng, Tỷ lệ, Thời lượng
-                React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+                React.createElement("div", { className: "flex items-center gap-1 flex-nowrap min-w-0" },
                   React.createElement("select", {
                     value: scene.provider,
                     onChange: e => handleUpdateScene(scene.id, {
@@ -1957,7 +1957,7 @@ export default function StoryScriptStudio() {
                       model: e.target.value === "Muse AI" ? "muse-video" : (e.target.value === "Grok" ? "grok-imagine-video" : "Veo 3.1 - Fast"),
                       duration: e.target.value === "Muse AI" ? "10s" : (e.target.value === "Grok" ? "6s" : "8s")
                     }),
-                    className: "bg-[#0B0F17] text-white text-xs border border-white/10 rounded-lg px-2 py-1.5 outline-none cursor-pointer font-semibold"
+                    className: "bg-[#0B0F17] text-white text-[11px] border border-white/10 rounded-lg px-1 py-1.5 outline-none min-w-0 cursor-pointer font-semibold"
                   },
                     React.createElement("option", { value: "Muse AI" }, "Muse AI"),
                     React.createElement("option", { value: "Veo3" }, "Veo 3"),
@@ -1966,9 +1966,10 @@ export default function StoryScriptStudio() {
 
                   !scene.provider.includes("Muse") && !scene.provider.includes("Grok") && React.createElement("select", {
                     value: scene.model || "Veo 3.1 - Fast",
+                    style: { flex: "1 1 0", minWidth: 0 },
                     // 15s chỉ có ở Omni 1.2 Flash: đổi sang model khác thì hạ về 10s
                     onChange: e => handleUpdateScene(scene.id, e.target.value !== "Omni 1.2 Flash" && scene.duration === "15s" ? { model: e.target.value, duration: "10s" } : { model: e.target.value }),
-                    className: "bg-[#0B0F17] text-slate-300 text-xs border border-white/10 rounded-lg px-2 py-1.5 outline-none cursor-pointer"
+                    className: "bg-[#0B0F17] text-slate-300 text-[11px] border border-white/10 rounded-lg px-1 py-1.5 outline-none min-w-0 cursor-pointer"
                   },
                     React.createElement("option", { value: "Omni 1.2 Flash" }, "Omni 1.2 Flash"),
                     React.createElement("option", { value: "Omni 1.1 Flash" }, "Omni Flash"),
@@ -1981,7 +1982,7 @@ export default function StoryScriptStudio() {
                   React.createElement("select", {
                     value: scene.ratio,
                     onChange: e => handleUpdateScene(scene.id, { ratio: e.target.value }),
-                    className: "bg-[#0B0F17] text-white text-xs border border-white/10 rounded-lg px-2 py-1.5 outline-none cursor-pointer"
+                    className: "bg-[#0B0F17] text-white text-[11px] border border-white/10 rounded-lg px-1 py-1.5 outline-none min-w-0 cursor-pointer"
                   },
                     React.createElement("option", { value: "16:9" }, "16:9"),
                     React.createElement("option", { value: "9:16" }, "9:16"),
@@ -1991,7 +1992,7 @@ export default function StoryScriptStudio() {
                   React.createElement("select", {
                     value: scene.duration || (scene.provider === "Muse AI" ? "10s" : "8s"),
                     onChange: e => handleUpdateScene(scene.id, { duration: e.target.value }),
-                    className: "bg-[#0B0F17] text-slate-300 text-xs border border-white/10 rounded-lg px-2 py-1.5 outline-none cursor-pointer font-mono"
+                    className: "bg-[#0B0F17] text-slate-300 text-[11px] border border-white/10 rounded-lg px-1 py-1.5 outline-none min-w-0 cursor-pointer font-mono"
                   },
                     React.createElement("option", { value: "5s" }, "5s"),
                     React.createElement("option", { value: "6s" }, "6s"),
@@ -2005,7 +2006,7 @@ export default function StoryScriptStudio() {
                     type: "button",
                     onClick: () => handleUpdateScene(scene.id, { removeWatermark: scene.removeWatermark !== true }),
                     title: scene.removeWatermark === true ? "Đang BẬT: tự xóa logo watermark Google Flow trên video cảnh này. Bấm để tắt." : "Đang TẮT: bấm để tự xóa logo watermark Google Flow trên video cảnh này.",
-                    className: `text-[10px] border rounded-lg px-1.5 py-1.5 outline-none cursor-pointer font-semibold whitespace-nowrap transition-colors ${scene.removeWatermark === true
+                    className: `text-[10px] border rounded-lg px-1 py-1.5 shrink-0 outline-none cursor-pointer font-semibold whitespace-nowrap transition-colors ${scene.removeWatermark === true
                       ? "bg-emerald-500/15 border-emerald-400/45 text-emerald-300"
                       : "bg-[#0B0F17] border-white/10 text-slate-500 hover:text-slate-200"}`
                   }, scene.removeWatermark === true ? "✓ WM" : "WM"),
@@ -2015,7 +2016,7 @@ export default function StoryScriptStudio() {
                     type: "button",
                     onClick: () => handleUpdateScene(scene.id, { upscale1080: scene.upscale1080 !== true }),
                     title: scene.upscale1080 === true ? "Đang BẬT: video 720p của cảnh này sẽ tự upscale lên 1080p. Bấm để tắt." : "Đang TẮT: bấm để tự upscale video cảnh này lên 1080p.",
-                    className: `text-[10px] border rounded-lg px-1.5 py-1.5 outline-none cursor-pointer font-semibold whitespace-nowrap transition-colors ${scene.upscale1080 === true
+                    className: `text-[10px] border rounded-lg px-1 py-1.5 shrink-0 outline-none cursor-pointer font-semibold whitespace-nowrap transition-colors ${scene.upscale1080 === true
                       ? "bg-sky-500/15 border-sky-400/35 text-sky-300"
                       : "bg-[#0B0F17] border-white/10 text-slate-500 hover:text-slate-200"}`
                   }, scene.upscale1080 === true ? "✓ 1080p" : "1080p")
