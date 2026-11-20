@@ -1,10 +1,10 @@
 {
   "files": {
-    "app/out/main/index.js": "e2cd96241b8ad2ca81da486ecdf99b266e5cf8d11b31ba142cc182c5ba5e5d04",
+    "app/out/main/index.js": "2bb178a295cca5494d5ca166ffc280c0237e5ccf37e3c281be5f12c64cc1e33e",
     "app/out/main/google_flow_native_transport.cjs": "da661f7c71987b70fdff57fd664803bf5d2ab74b66d01633f19e88572bd2d90b",
     "app/out/preload/index.cjs": "323abedca7ec609014350157ebb7ded49b9af160461cb8de26875ffc9a66bd4d",
     "app/out/renderer/assets/useWorkflowRunner-DGw6Ekx4.js": "3f437eff47f99fb49df39e48e0a549048befd8e2bd7e9d6a90bbf533c7a84304",
-    "app/out/renderer/assets/VideoStudio-frcr8V6s.js": "18c9e8050f3f0377d00e37b8a46f249273367b13435356b1d05a274eb47b91ab",
+    "app/out/renderer/assets/VideoStudio-frcr8V6s.js": "d0e2436a6f3866c74b8162b0cd6726950391d33edbf507f1ecaf66f8b014157e",
     "app/out/renderer/assets/ImageStudio-4nmpUX3j.js": "936636d351a49fa7571dd49519f1df6d6f625b611bb36dcbcc74bbdd52a85af3",
     "app/out/renderer/assets/StudioFailedBulkActions-Zv2NpUPy.js": "f4a9d7d6389f209fbb6b7f6c609a35691d8f17ba7b72b24c4ffb09b818350a82",
     "app/out/renderer/assets/index-BS7vgKVV.js": "982180a6b82bf1422a0cb6c9ee01eb569de8b9ea953e782ed8cf730f08f17407"
@@ -69,6 +69,10 @@
     {
       "at": "2026-11-20T04:33:48.842Z",
       "reason": "Tris duyệt: Mac tự cài ffmpeg đúng chip (mac_ffmpeg.cjs) - nạp trong MB(), lấy frame cuối chờ ffmpeg sẵn sàng"
+    },
+    {
+      "at": "2026-11-20T04:45:01.726Z",
+      "reason": "Tris duyệt: video tham chiếu Omni 1.2 Flash tối đa 15s (360 khung), Omni 1.1 giữ 10s; sửa chú thích"
     }
   ]
 }

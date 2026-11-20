@@ -1,9 +1,9 @@
 {
-  "version": "3.2.6",
-  "name": "AI VIDEO LIBRARY v3.2.6",
+  "version": "3.2.7",
+  "name": "AI VIDEO LIBRARY v3.2.7",
   "releaseDate": "2026-11-20",
-  "changelog": "Sửa lỗi MacBook: Studio Kịch Bản chỉ tạo được cảnh đầu, không nối được cảnh sau (thiếu ffmpeg cho Mac); ghép video, xóa watermark trên Mac chạy lại bình thường. Video tham chiếu Veo3 (Omni) ra đúng thời lượng theo video tham chiếu (tối đa 10s), hết lỗi luôn ra 8s.",
-  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.2.6/update-patch.zip",
+  "changelog": "Video tham chiếu Veo3: Omni 1.2 Flash tối đa 15 giây theo độ dài video tham chiếu (Omni Flash 1.1 tối đa 10 giây). Áp dụng cho Studio Video, Studio Kịch Bản và Workflow.",
+  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.2.7/update-patch.zip",
   "mandatory": false,
   "minVersion": "3.0.0"
 }
