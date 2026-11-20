@@ -606,6 +606,8 @@ async function runStoryProjectCore(projId, options = {}) {
           accountSelection: targetAccount ? "manual" : "auto",
           referenceAssetIds: refIds,
           ...(!isMuse && !isGrok && liveProj.flowVoice && refIds.length > 0 ? { voice: liveProj.flowVoice } : {}),
+          ...(!isMuse && !isGrok && curScene.removeWatermark === true ? { autoRemoveWatermark: true } : {}),
+          ...(!isMuse && !isGrok && curScene.upscale1080 === true ? { autoUpscale: true } : {}),
           preset: "custom",
           studioSource: "story-script-studio",
           autoMerge: false,
@@ -1964,7 +1966,8 @@ export default function StoryScriptStudio() {
 
                   !scene.provider.includes("Muse") && !scene.provider.includes("Grok") && React.createElement("select", {
                     value: scene.model || "Veo 3.1 - Fast",
-                    onChange: e => handleUpdateScene(scene.id, { model: e.target.value }),
+                    // 15s chỉ có ở Omni 1.2 Flash: đổi sang model khác thì hạ về 10s
+                    onChange: e => handleUpdateScene(scene.id, e.target.value !== "Omni 1.2 Flash" && scene.duration === "15s" ? { model: e.target.value, duration: "10s" } : { model: e.target.value }),
                     className: "bg-[#0B0F17] text-slate-300 text-xs border border-white/10 rounded-lg px-2 py-1.5 outline-none cursor-pointer"
                   },
                     React.createElement("option", { value: "Omni 1.2 Flash" }, "Omni 1.2 Flash"),
@@ -1993,8 +1996,29 @@ export default function StoryScriptStudio() {
                     React.createElement("option", { value: "5s" }, "5s"),
                     React.createElement("option", { value: "6s" }, "6s"),
                     React.createElement("option", { value: "8s" }, "8s"),
-                    React.createElement("option", { value: "10s" }, "10s")
-                  )
+                    React.createElement("option", { value: "10s" }, "10s"),
+                    scene.provider === "Veo3" && scene.model === "Omni 1.2 Flash" && React.createElement("option", { value: "15s" }, "15s")
+                  ),
+
+                  // Ô bật/tắt xóa watermark video (chỉ cảnh Veo3 / Google Flow)
+                  !scene.provider.includes("Muse") && !scene.provider.includes("Grok") && React.createElement("button", {
+                    type: "button",
+                    onClick: () => handleUpdateScene(scene.id, { removeWatermark: scene.removeWatermark !== true }),
+                    title: scene.removeWatermark === true ? "Đang BẬT: tự xóa logo watermark Google Flow trên video cảnh này. Bấm để tắt." : "Đang TẮT: bấm để tự xóa logo watermark Google Flow trên video cảnh này.",
+                    className: `text-[10px] border rounded-lg px-1.5 py-1.5 outline-none cursor-pointer font-semibold whitespace-nowrap transition-colors ${scene.removeWatermark === true
+                      ? "bg-emerald-500/15 border-emerald-400/45 text-emerald-300"
+                      : "bg-[#0B0F17] border-white/10 text-slate-500 hover:text-slate-200"}`
+                  }, scene.removeWatermark === true ? "✓ WM" : "WM"),
+
+                  // Ô bật/tắt 1080p: tự upscale video 720p lên 1080p (chỉ cảnh Veo3 / Google Flow)
+                  !scene.provider.includes("Muse") && !scene.provider.includes("Grok") && React.createElement("button", {
+                    type: "button",
+                    onClick: () => handleUpdateScene(scene.id, { upscale1080: scene.upscale1080 !== true }),
+                    title: scene.upscale1080 === true ? "Đang BẬT: video 720p của cảnh này sẽ tự upscale lên 1080p. Bấm để tắt." : "Đang TẮT: bấm để tự upscale video cảnh này lên 1080p.",
+                    className: `text-[10px] border rounded-lg px-1.5 py-1.5 outline-none cursor-pointer font-semibold whitespace-nowrap transition-colors ${scene.upscale1080 === true
+                      ? "bg-sky-500/15 border-sky-400/35 text-sky-300"
+                      : "bg-[#0B0F17] border-white/10 text-slate-500 hover:text-slate-200"}`
+                  }, scene.upscale1080 === true ? "✓ 1080p" : "1080p")
                 )
               );
             })
