@@ -229,12 +229,64 @@ function resumeStoryProject(projId) {
   runStoryProjectCore(projId, { resumeFromSceneId: at.id, continueMode: true });
 }
 
+// Hộp xác nhận vẽ ngay trong app, thay cho window.confirm().
+// window.confirm() của Windows làm Electron kẹt focus sau khi đóng: các ô chọn (nền tảng, tỷ lệ, thời lượng...)
+// không bấm được cho tới khi bấm ra ngoài cửa sổ rồi bấm lại. Trả về Promise<boolean>.
+function storyConfirm(message, okLabel = "Đồng ý") {
+  return new Promise(resolve => {
+    const prevFocus = document.activeElement;
+    const overlay = document.createElement("div");
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-modal", "true");
+    overlay.style.cssText = "position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px";
+    const box = document.createElement("div");
+    box.style.cssText = "background:#101726;border:1px solid rgba(139,92,246,.45);border-radius:14px;padding:20px;max-width:440px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.6);font-family:inherit";
+    const text = document.createElement("p");
+    text.textContent = message;
+    text.style.cssText = "color:#e2e8f0;font-size:13px;line-height:1.55;margin:0 0 18px;white-space:pre-wrap";
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;justify-content:flex-end;gap:8px";
+    const btnCss = "padding:7px 14px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;border:1px solid ";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.textContent = "Hủy";
+    cancelBtn.style.cssText = btnCss + "rgba(255,255,255,.15);background:rgba(255,255,255,.05);color:#cbd5e1";
+    const okBtn = document.createElement("button");
+    okBtn.type = "button";
+    okBtn.textContent = okLabel;
+    okBtn.style.cssText = btnCss + "rgba(139,92,246,.7);background:#7c3aed;color:#fff";
+    let done = false;
+    const close = result => {
+      if (done) return;
+      done = true;
+      document.removeEventListener("keydown", onKey, true);
+      overlay.remove();
+      try { if (prevFocus && typeof prevFocus.focus === "function" && document.contains(prevFocus)) prevFocus.focus(); } catch (_) {}
+      resolve(result);
+    };
+    const onKey = e => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(false); }
+      else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); close(true); }
+    };
+    cancelBtn.onclick = () => close(false);
+    okBtn.onclick = () => close(true);
+    overlay.addEventListener("mousedown", e => { if (e.target === overlay) close(false); });
+    document.addEventListener("keydown", onKey, true);
+    row.append(cancelBtn, okBtn);
+    box.append(text, row);
+    overlay.append(box);
+    document.body.append(overlay);
+    okBtn.focus();
+  });
+}
+
 // Đặt lại: dừng dây chuyền, xóa hết video của dự án (giữ prompt, ảnh tham chiếu, cài đặt). KHÔNG tự chạy — bấm TẠO VIDEO khi muốn
-function resetStoryProject(projId) {
+async function resetStoryProject(projId) {
   const proj = StoryStore.getState().projects.find(p => p.id === projId);
   if (!proj) return;
   const vidCount = (proj.completedVideos || []).length;
-  if (!window.confirm(`Đặt lại dự án "${proj.name}": dừng dây chuyền và xóa ${vidCount} video đã tạo khỏi dự án (prompt, ảnh tham chiếu và cài đặt giữ nguyên)?`)) return;
+  if (!(await storyConfirm(`Đặt lại dự án "${proj.name}": dừng dây chuyền và xóa ${vidCount} video đã tạo khỏi dự án (prompt, ảnh tham chiếu và cài đặt giữ nguyên)?`))) return;
+  if (!StoryStore.getState().projects.some(p => p.id === projId)) return;
   const now = Date.now();
   storyPauseRequested.delete(projId);
   StoryStore.updateProject(projId, p => ({
@@ -291,16 +343,25 @@ function getLiveScenes(projId) {
 }
 
 // Tạo lại từ 1 cảnh: xóa video từ cảnh đó trở xuống khỏi dự án (giữ prompt), rồi chạy lại từ frame cuối cảnh liền trước
-function regenerateStoryScene(projId, sceneId) {
-  const proj = StoryStore.getState().projects.find(p => p.id === projId);
+async function regenerateStoryScene(projId, sceneId) {
+  let proj = StoryStore.getState().projects.find(p => p.id === projId);
   if (!proj) return;
   clearStoryAutoRetry(projId);
-  const k = proj.prompts.findIndex(s => s.id === sceneId);
+  let k = proj.prompts.findIndex(s => s.id === sceneId);
   if (k < 0) return;
-  const tail = proj.prompts.slice(k);
-  const tailIdx = new Set(tail.map(s => s.index));
+  let tail = proj.prompts.slice(k);
+  let tailIdx = new Set(tail.map(s => s.index));
   const vidsBelow = (proj.completedVideos || []).filter(v => tailIdx.has(v.sceneNum)).length;
-  if (vidsBelow > 0 && !window.confirm(`Tạo lại Cảnh ${proj.prompts[k].index}: xóa ${vidsBelow} video từ Cảnh ${proj.prompts[k].index} trở xuống khỏi dự án (prompt giữ nguyên) rồi chạy lại từ đây?`)) return;
+  if (vidsBelow > 0) {
+    if (!(await storyConfirm(`Tạo lại Cảnh ${proj.prompts[k].index}: xóa ${vidsBelow} video từ Cảnh ${proj.prompts[k].index} trở xuống khỏi dự án (prompt giữ nguyên) rồi chạy lại từ đây?`))) return;
+    // Dây chuyền vẫn chạy trong lúc hộp xác nhận đang mở: đọc lại dự án mới nhất
+    proj = StoryStore.getState().projects.find(p => p.id === projId);
+    if (!proj) return;
+    k = proj.prompts.findIndex(s => s.id === sceneId);
+    if (k < 0) return;
+    tail = proj.prompts.slice(k);
+    tailIdx = new Set(tail.map(s => s.index));
+  }
 
   const now = Date.now();
   StoryStore.updateProject(projId, p => ({
@@ -943,18 +1004,23 @@ export default function StoryScriptStudio() {
   };
 
   // Xóa dự án
-  const handleDeleteProject = (projId, e) => {
+  const handleDeleteProject = async (projId, e) => {
     e?.stopPropagation();
     if (projects.length <= 1) {
       toast.warning("Dự án cuối cùng không thể xóa!");
       return;
     }
     const target = projects.find(p => p.id === projId);
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa "${target?.name || 'dự án này'}" không?`)) return;
+    if (!(await storyConfirm(`Bạn có chắc chắn muốn xóa "${target?.name || 'dự án này'}" không?`, "Xóa"))) return;
+    // Đọc lại store sau khi hộp xác nhận đóng (người dùng có thể đã đổi dự án đang mở)
+    if (StoryStore.getState().projects.length <= 1) {
+      toast.warning("Dự án cuối cùng không thể xóa!");
+      return;
+    }
 
     setProjects(prev => {
       const filtered = prev.filter(p => p.id !== projId);
-      if (activeProjectId === projId) {
+      if (StoryStore.getState().activeProjectId === projId) {
         setActiveProjectId(filtered[0]?.id || "");
       }
       return filtered;
@@ -1491,9 +1557,10 @@ export default function StoryScriptStudio() {
 
           // Nút xóa tất cả
           React.createElement("button", {
-            onClick: () => {
-              if (window.confirm("Bạn có muốn dọn sạch tất cả các cảnh của dự án này không?")) {
-                updateProject(currentProject.id, { prompts: [] });
+            onClick: async () => {
+              const projId = currentProject.id;
+              if (await storyConfirm("Bạn có muốn dọn sạch tất cả các cảnh của dự án này không?")) {
+                updateProject(projId, { prompts: [] });
               }
             },
             className: "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 text-xs font-semibold cursor-pointer transition-all"
