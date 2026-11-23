@@ -1,9 +1,9 @@
 {
-  "version": "3.3.1",
-  "name": "AI VIDEO LIBRARY v3.3.1",
-  "releaseDate": "2026-11-22",
-  "changelog": "Studio Kịch Bản: sửa lỗi sau khi xóa dự án / dọn cảnh / đặt lại / tạo lại cảnh thì không đổi được nền tảng (Veo3), tỷ lệ, thời lượng — thay hộp xác nhận của Windows bằng hộp xác nhận trong app, hết bị kẹt phải bấm ra ngoài.",
-  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.3.1/update-patch.zip",
+  "version": "3.3.2",
+  "name": "AI VIDEO LIBRARY v3.3.2",
+  "releaseDate": "2026-11-23",
+  "changelog": "Sửa lỗi không gõ được tiếng Việt (Unikey/EVKey) trong app: bộ cài mới mở app bằng quyền người dùng thường thay vì quyền Administrator. Máy nào đang bị lỗi: tắt hẳn app rồi mở lại từ biểu tượng ngoài Desktop là gõ được.",
+  "patchUrl": "https://github.com/dangmuc1954-maker/AI_VIDEO_LIBRARY_Studio_Full/releases/download/v3.3.2/update-patch.zip",
   "mandatory": false,
   "minVersion": "3.0.0"
 }

@@ -171,10 +171,27 @@ namespace AiVideoLibraryInstaller
                 if (!File.Exists(appExe)) appExe = Path.Combine(installDir, "AIForge Studio.exe");
                 if (File.Exists(appExe))
                 {
-                    Process.Start(new ProcessStartInfo {
-                        FileName = appExe,
-                        WorkingDirectory = installDir
-                    });
+                    // Bộ cài chạy quyền Administrator. Nếu mở app trực tiếp, app thừa hưởng quyền admin
+                    // và Windows chặn Unikey/EVKey (chạy quyền thường) gửi phím vào app -> không gõ được tiếng Việt.
+                    // Mở qua explorer.exe để app chạy với quyền người dùng bình thường như khi bấm icon Desktop.
+                    // Ưu tiên mở shortcut Start Menu (đã đặt sẵn thư mục làm việc = thư mục cài) giống bấm icon.
+                    string launchTarget = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.StartMenu), "Programs", "AI VIDEO LIBRARY.lnk");
+                    if (!File.Exists(launchTarget)) launchTarget = appExe;
+                    try
+                    {
+                        Process.Start(new ProcessStartInfo {
+                            FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"),
+                            Arguments = "\"" + launchTarget + "\"",
+                            UseShellExecute = false
+                        });
+                    }
+                    catch
+                    {
+                        Process.Start(new ProcessStartInfo {
+                            FileName = appExe,
+                            WorkingDirectory = installDir
+                        });
+                    }
                 }
                 Application.Exit();
                 return;
